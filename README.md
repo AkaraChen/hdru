@@ -5,11 +5,21 @@ collections, and a command stream over the Wasm boundary to a small DOM
 adapter. `docs/bootstrap.md` is the plan that built phases 0 to 8,
 `docs/design.md` the record of what was built and why, `docs/roadmap.md`
 what comes next, `docs/rendering.md` the renderer protocol and style
-design, and `docs/packages.md` the planned split into `reactive`, `ui`
-and `ui-dom` packages.
+design, and `docs/packages.md` the split into three packages:
+
+- `reactive`: signals, memos, effects, owners, context. No nodes, no host.
+- `ui`: the `Ui` row, builders, `show`, `for_each`, inputs, resources,
+  the command protocol, `mount` and `dispatch`. Re-exports `reactive`'s
+  user-facing names. No host trait.
+- `ui-dom`: the `Surface` host trait, `run_app!` with its event loop and
+  worker pool, `Recorder`, and the JavaScript provider.
+
+An app depends on `ui` and `ui-dom` and consents to
+`"dep.ui_dom.surface.Surface" = true` in its manifest.
 
 ```hd
-use dep.ui.{Surface, Ui, button, column, row, run_app, signal, text_live}
+use dep.ui.{Ui, button, column, row, signal, text_live}
+use dep.ui_dom.{Surface, run_app}
 
 fn counter() -> void $ Ui:
     count := signal(+0)
@@ -24,8 +34,8 @@ pub fn main!() -> void $ Surface:
     run_app!(counter)
 ```
 
-The three requirement keys are the phases: `Track` to read a signal,
-`Mutate` to write one, `Ui` to build. A write inside a memo or an eager
+The requirement keys are the phases: `Track` to read a signal, `Mutate`
+to write one, `Ui` (the row `$ Owner + Parent`) to build. A write inside a memo or an eager
 read inside a component body is a compile error.
 
 Builders take the caller's whole row, so a component that names a context
@@ -60,8 +70,9 @@ Tests run on the Node engine only; wasmtime is out of scope for now.
 
 | What | Command |
 | --- | --- |
-| library tests (node) | `hd test` |
-| provider tests | `node --test providers/dom.test.mjs` |
+| every package's tests (node), from the root | `hd test` |
+| one package | `hd test -p reactive` (or `ui`, `ui-dom`) |
+| provider tests | `node --test ui-dom/providers/dom.test.mjs` |
 | the counter under Node, three scripted clicks | `cd examples/counter && UI_CLICKS=2,2,1 hd run --engine node` |
 | the todos demo under Node | `cd examples/todos && UI_CLICKS=1,8=milk,10 hd run --engine node` (toggle, type "milk" and press Enter, reverse) |
 | the fetcher demo under Node (a resource with a delayed loader) | `cd examples/fetcher && UI_CLICKS=2,2 hd run --engine node` |
@@ -69,13 +80,15 @@ Tests run on the Node engine only; wasmtime is out of scope for now.
 
 ## Layout
 
-- `src/keys.hd` ids, the `Track`/`Mutate`/`Ui` traits and their providers
-- `src/graph.hd` the program-wide dependency graph and owner tree
-- `src/reactive.hd` `signal`, `memo`, `effect`, `sync`, `batch`, `untrack`
-- `src/owner.hd` `root`, `owned`, `on_cleanup`; `src/context.hd` `given`, `use_given` (typed), `provide`, `use_context` (owner tree)
-- `src/builders.hd` `column`, `row`, `text`, `text_live`, `button`, `show`, `attr`, `attr_live`, `last_node`; `src/collections.hd` `for_each`; `src/inputs.hd` `input`, `checkbox`, `on`
-- `src/resource.hd` `resource` and `resource_with`: a value loaded by a `fn!` whenever a tracked key changes, on a worker task, optionally under a `std.task` policy
-- `src/surface.hd` `DomCommand`, `UiEvent`, the `@host Surface` trait; `src/runtime.hd` `mount`, `dispatch`, `run_app!`, `run_jobs!`
-- `src/recorder.hd` an hd `Surface` fake for tests
-- `providers/dom.mjs` the one provider: real DOM in a browser, a printing in-memory tree elsewhere; `providers/dom.test.mjs` its Node test
+- `hd.toml` the workspace: `reactive`, `ui`, `ui-dom` and the three examples
+- `reactive/src/keys.hd` ids, the `Track`/`Mutate`/`Owner` keys and their providers
+- `reactive/src/graph.hd` the program-wide dependency graph and owner tree, and the low-level API (`run_effect`, `cleanup_on`, `new_owner`, `dispose`)
+- `reactive/src/reactive.hd` `signal`, `memo`, `effect`, `sync`, `batch`, `untrack`, `assert_no_writes`
+- `reactive/src/owner.hd` `root`, `owned`, `on_cleanup`; `reactive/src/context.hd` `given`, `use_given` (typed), `provide`, `use_context` (owner tree)
+- `ui/src/keys.hd` `Parent`, `Scope`, `type Ui = $ Owner + Parent`; `ui/src/protocol.hd` `DomCommand`, `UiEvent`
+- `ui/src/builders.hd` `column`, `row`, `text`, `text_live`, `button`, `show`, `attr`, `attr_live`, `last_node`; `ui/src/collections.hd` `for_each`; `ui/src/inputs.hd` `input`, `checkbox`, `on`
+- `ui/src/resource.hd` `resource` and `resource_with`: a value loaded by a `fn!` whenever a tracked key changes, optionally under a `std.task` policy
+- `ui/src/runtime.hd` `mount`, `dispatch`, `take_commands`, the handler and job tables, `run_job!`
+- `ui-dom/src/surface.hd` the `@host Surface` trait; `ui-dom/src/app.hd` `run_app!` and the worker pool; `ui-dom/src/recorder.hd` an hd `Surface` for tests
+- `ui-dom/providers/dom.mjs` the provider: real DOM in a browser, a printing in-memory tree elsewhere; `ui-dom/providers/dom.test.mjs` its Node test
 - `examples/counter`, `examples/todos`, `examples/fetcher`, `web/` (pages share `web/style.css`)

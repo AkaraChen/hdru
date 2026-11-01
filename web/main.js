@@ -1,11 +1,11 @@
 // The browser demo: runs the example named by <body data-app> on the main
-// thread over the platform-neutral core host, binding providers/dom.mjs to
+// thread over the platform-neutral core host, binding ui-dom/providers/dom.mjs to
 // the package host trait through the glue `hd build` generated. Every
 // example shares one glue file because the trait is the ui package's.
 import { createWebHost } from "../../hd-lang/host/web.ts";
 import { createPackageRuntime } from "../../hd-lang/host/package-providers.ts";
 import * as generated from "../examples/counter/build/debug/counter.host.mjs";
-import surface from "../providers/dom.mjs";
+import surface from "../ui-dom/providers/dom.mjs";
 
 const app = document.body.dataset.app ?? "counter";
 const status = document.getElementById("status");

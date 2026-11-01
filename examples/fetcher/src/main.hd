@@ -1,4 +1,17 @@
-use dep.ui.{Resource, Signal, Surface, Ui, attr, attr_live, button, column, resource, row, run_app, signal, text_live}
+use dep.ui.{
+    Resource,
+    Signal,
+    Ui,
+    attr,
+    attr_live,
+    button,
+    column,
+    resource,
+    row,
+    signal,
+    text_live,
+}
+use dep.ui_dom.{Surface, run_app}
 use std.time.{Clock, ms}
 
 ## Pretends to fetch a profile: waits, then answers, or fails for id 13.

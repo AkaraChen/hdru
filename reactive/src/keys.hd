@@ -1,17 +1,13 @@
 ## Identifiers and the three requirement keys of the reactive runtime.
 ##
-## `Track` is required to read a signal, `Mutate` to write one, and `Ui` to
-## create a computation or a node. A function's row therefore says which
-## phase it belongs to, and the checker rejects a write inside a memo or an
-## eager read inside a component body.
+## `Track` is required to read a signal, `Mutate` to write one, and `Owner`
+## to create a computation. A function's row therefore says which phase it
+## belongs to, and the checker rejects a write inside a memo. The `ui`
+## package adds a `Parent` key and names `$ Owner + Parent` as `Ui`.
 
 pub type SourceId = usize
 pub type ComputationId = usize
 pub type OwnerId = usize
-## A host node. Node 0 is the mount point the host provides.
-pub type NodeId = usize
-## An event handler the runtime registered. Handler 0 means "stop".
-pub type HandlerId = usize
 
 ## The row every stored computation body runs under: it may read signals
 ## tracked and write them.
@@ -27,12 +23,11 @@ pub trait Track:
 pub trait Mutate:
     fn invalidate(&mut self, source: SourceId) -> void
 
-## Installed while a component body runs. `owner` names the owner that
-## retains every computation the body creates, and `parent` the node new
-## nodes are appended to.
-pub trait Ui:
+## Installed wherever computations are created. `owner` names the owner
+## that retains every computation, cleanup and context value created
+## there, and is disposed with them.
+pub trait Owner:
     fn owner(&self) -> OwnerId
-    fn parent(&self) -> NodeId
 
 ## The `Track` provider the runtime installs around a computation.
 pub struct Collector:
@@ -75,14 +70,10 @@ impl Mutate for NoWrites:
     fn invalidate(&mut self, source: SourceId) -> void:
         panic("ui: signal $source was written inside assert_no_writes")
 
-## The `Ui` provider: one owner and one parent node.
-pub struct Scope:
+## The `Owner` provider `root` and `owned` install.
+pub struct OwnedBy:
     pub owner: OwnerId
-    pub parent: NodeId
 
-impl Ui for Scope:
+impl Owner for OwnedBy:
     fn owner(&self) -> OwnerId:
         self.owner
-
-    fn parent(&self) -> NodeId:
-        self.parent

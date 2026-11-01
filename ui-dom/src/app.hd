@@ -1,0 +1,64 @@
+## The loop that runs a `ui` tree on a `Surface`: mount, send each batch
+## of commands, dispatch each event, and run resource loads on a pool of
+## worker tasks.
+use std.task.all
+use dep.ui.{OwnerId, Ui, dispatch, mount, run_job, take_commands, take_new_jobs}
+use pkg.surface.Surface
+
+struct Pool:
+    ## Workers started and not yet stopped.
+    live: usize
+
+POOL := box(Pool { live: 0 })
+
+# Sends the queued commands, then posts the jobs registered since.
+fn send!() -> void $ Surface:
+    commands := take_commands()
+    if !commands.is_empty():
+        $.use(Surface).apply!(commands)
+    for id in take_new_jobs():
+        $.use(Surface).post_job(id)
+
+fn event_loop!() -> void $ Surface:
+    while true:
+        event := $.use(Surface).next_event!()
+        if event.handler == 0:
+            break
+        dispatch(event)
+        send!()
+    $.use(Surface).post_job(0)
+
+# A worker that takes the stop marker passes it on to the next one while
+# any is left, so the event loop posts one 0 however many workers run.
+fn worker!() -> void $ Surface:
+    while true:
+        id := $.use(Surface).next_job!()
+        if id == 0:
+            break
+        run_job!(id)
+        send!()
+    POOL.live -= 1
+    if POOL.live > 0:
+        $.use(Surface).post_job(0)
+
+# Counts a worker as live when its cold suspension is made, before any
+# task runs, so the stop marker knows how many to reach.
+fn started() -> mut Suspend[void] $ Surface:
+    POOL.live += 1
+    worker()
+
+# The pool: four workers, so at most four loads are in flight at once.
+# The count is the number of arguments because `all!` has fixed arity and
+# no task can wait on another (hd-lang#1164), so the pool is not a loop.
+fn workers!() -> void $ Surface:
+    _ := all!(started(), started(), started(), started())
+
+## Mounts `root`, sends its commands, then runs the event loop beside a
+## pool of workers until the host sends handler 0: each event is
+## dispatched and its changes sent; each resource load runs on a worker
+## and lands its result when the loader completes. Returns when the loop
+## has ended and every worker has stopped.
+pub fn run_app![$ R](root: fn() -> void $ Ui + R) -> void $ Surface + R:
+    _ := mount(root)
+    send!()
+    _ := all!(event_loop(), workers())

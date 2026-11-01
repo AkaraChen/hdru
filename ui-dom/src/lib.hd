@@ -1,0 +1,6 @@
+## The DOM renderer for `ui`: the `Surface` host trait, `run_app!` with its
+## event loop and worker pool, the JavaScript provider in
+## `providers/dom.mjs`, and `Recorder`, an hd `Surface` for tests.
+pub use pkg.surface.{Surface}
+pub use pkg.app.{run_app}
+pub use pkg.recorder.{Recorder, scripted}

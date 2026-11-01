@@ -1,6 +1,6 @@
 ## Signals, memos and effects.
 use std.function.{Fn, FnMut}
-use pkg.keys.{Collector, ComputationId, Mutate, NoTrack, NoWrites, Reactive, SourceId, Track, Ui}
+use pkg.keys.{Collector, ComputationId, Mutate, NoTrack, NoWrites, Owner, Reactive, SourceId, Track}
 use pkg.graph.{
     Computation,
     ensure_fresh,
@@ -10,6 +10,7 @@ use pkg.graph.{
     new_computation,
     new_source,
     run_computation,
+    run_effect,
     subscribe,
 }
 
@@ -109,8 +110,8 @@ impl[T < 'static] ReadSignal[T]:
 ##         count.set(+0)  # error: unsatisfied-trait-bound
 ##         count.get() * 2
 ## ```
-pub fn memo[T < 'static & Eq, F < 'static & Fn() -> T $ Track](compute: F) -> ReadSignal[T] $ Ui:
-    owner := $.use(Ui).owner()
+pub fn memo[T < 'static & Eq, F < 'static & Fn() -> T $ Track](compute: F) -> ReadSignal[T] $ Owner:
+    owner := $.use(Owner).owner()
     source := new_source()
     collector := box(Collector { deps: [] })
     first := $.with(Track=collector):
@@ -138,41 +139,25 @@ pub fn memo[T < 'static & Eq, F < 'static & Fn() -> T $ Track](compute: F) -> Re
 
 ## A tracked side effect. It runs once now and again after any signal it
 ## read changes. The block only reads; use `sync` for one that also writes.
-pub fn effect[F < 'static & FnMut() -> void $ Track](mut run: F) -> void $ Ui:
-    owner := $.use(Ui).owner()
-    erased := fn() -> bool $ Reactive:
-        run()
-        false
-    computation := new_computation(
-        Computation {
-            run: erased,
-            kind: .Effect,
-            state: .Dirty,
-            deps: [],
-            owner: owner,
-            source: .None,
-        },
+pub fn effect[F < 'static & FnMut() -> void $ Track](mut run: F) -> void $ Owner:
+    _ := run_effect(
+        $.use(Owner).owner(),
+        fn() -> bool $ Reactive:
+            run()
+            false
+        ,
     )
-    run_computation(computation)
 
 ## A tracked block that may also write signals, to keep one in step with
 ## others. Writes inside it are batched until the current flush ends.
-pub fn sync[F < 'static & FnMut() -> void $ Track + Mutate](mut run: F) -> void $ Ui:
-    owner := $.use(Ui).owner()
-    erased := fn() -> bool $ Reactive:
-        run()
-        false
-    computation := new_computation(
-        Computation {
-            run: erased,
-            kind: .Effect,
-            state: .Dirty,
-            deps: [],
-            owner: owner,
-            source: .None,
-        },
+pub fn sync[F < 'static & FnMut() -> void $ Track + Mutate](mut run: F) -> void $ Owner:
+    _ := run_effect(
+        $.use(Owner).owner(),
+        fn() -> bool $ Reactive:
+            run()
+            false
+        ,
     )
-    run_computation(computation)
 
 ## Runs `body` with writes deferred: effects flush once, at the end.
 pub fn batch(body: fn() -> void $ Mutate) -> void $ Mutate:

@@ -2,7 +2,8 @@
 ## computation and owner. Nothing here calls user code while holding a
 ## reference into the graph; every walk copies its list out first.
 use std.inspect.Inspectable
-use pkg.keys.{Collector, ComputationId, Mutate, Reactive, OwnerId, Scheduler, SourceId, Track}
+use std.function.FnMut
+use pkg.keys.{Collector, ComputationId, Mutate, OwnerId, Reactive, Scheduler, SourceId, Track}
 
 @derive(Eq)
 pub enum State:
@@ -32,7 +33,7 @@ pub struct Source:
     ## The memo that writes this source, if any.
     pub producer: ComputationId?
 
-pub struct Owner:
+pub struct OwnerRecord:
     pub parent: OwnerId?
     pub computations: List[ComputationId]
     pub children: List[OwnerId]
@@ -43,7 +44,7 @@ pub struct Owner:
 pub struct Graph:
     pub sources: Map[SourceId, Source]
     pub computations: Map[ComputationId, Computation]
-    pub owners: Map[OwnerId, Owner]
+    pub owners: Map[OwnerId, OwnerRecord]
     pub next_id: usize
     pub effects: List[ComputationId]
     pub flushing: bool
@@ -84,7 +85,7 @@ pub fn new_source() -> SourceId:
 pub fn new_owner(parent: OwnerId?) -> OwnerId:
     id := fresh_id()
     g := graph()
-    g.owners[id] = Owner {
+    g.owners[id] = OwnerRecord {
         parent: parent,
         computations: [],
         children: [],
@@ -258,3 +259,39 @@ pub fn dispose(owner: OwnerId) -> void:
         drop_computation(id)
     for cleanup in record.cleanups:
         cleanup()
+
+## Registers `action` to run when `owner` is disposed.
+pub fn cleanup_on[F < 'static & FnMut() -> void](owner: OwnerId, mut action: F) -> void:
+    erased := fn() -> void: action()
+    graph().owners[owner].cleanups.push(erased)
+
+## Makes an effect of `owner` from `run` and runs it now; it runs again at
+## the flush after any source it read changes. `run` returns whether a
+## memo's value changed, so an effect returns `false`. The extension point
+## for a renderer's own bindings, as Solid's `createRenderEffect`.
+pub fn run_effect[F < 'static & FnMut() -> bool $ Reactive](owner: OwnerId, mut run: F) -> ComputationId:
+    erased := fn() -> bool $ Reactive: run()
+    id := new_computation(
+        Computation {
+            run: erased,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(id)
+    id
+
+## Empties the graph and resets its counters. For tests that assert exact
+## ids; `ui`'s `reset_for_test` calls it.
+pub fn reset_graph_for_test() -> void:
+    g := graph()
+    g.sources = {}
+    g.computations = {}
+    g.owners = {}
+    g.next_id = 1
+    g.effects = []
+    g.flushing = false
+    g.batch_depth = 0

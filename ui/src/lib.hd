@@ -1,0 +1,48 @@
+## A fine-grained reactive UI library in the shape Solid uses: run-once
+## components, signal handles, memos, effects, an owner tree, and a command
+## stream to a renderer package such as `ui-dom`. The reactive core is the
+## `reactive` package; its user-facing names are re-exported here, so an
+## app that only builds UI depends on `ui` alone for them.
+pub use dep.reactive.{
+    Given,
+    Mutate,
+    Owner,
+    OwnerId,
+    Provided,
+    ReadSignal,
+    Signal,
+    SourceId,
+    Track,
+    assert_no_writes,
+    batch,
+    current_owner,
+    dispose,
+    effect,
+    flush,
+    given,
+    memo,
+    on_cleanup,
+    owned,
+    provide,
+    root,
+    signal,
+    sync,
+    untrack,
+    use_context,
+    use_given,
+}
+pub use pkg.keys.{HandlerId, NodeId, Parent, Scope, Ui}
+pub use pkg.protocol.{DomCommand, UiEvent}
+pub use pkg.runtime.{
+    dispatch,
+    last_writes,
+    mount,
+    reset_for_test,
+    run_job,
+    take_commands,
+    take_new_jobs,
+}
+pub use pkg.resource.{Resource, resource, resource_with}
+pub use pkg.builders.{attr, attr_live, button, column, last_node, row, show, text, text_live}
+pub use pkg.collections.{for_each}
+pub use pkg.inputs.{checkbox, input, on}

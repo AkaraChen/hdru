@@ -1,10 +1,2 @@
-[package]
-name = "ui"
-
-[host]
-"surface.Surface" = "providers/dom.mjs"
-
-[dev-capabilities]
-# A real clock for tests/policy.hd, whose timeout must actually wait: a
-# ManualClock completes every sleep at once, so a slow loader would win.
-Clock = true
+[workspace]
+members = ["reactive", "ui", "ui-dom", "examples/counter", "examples/todos", "examples/fetcher"]

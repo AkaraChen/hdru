@@ -1,0 +1,33 @@
+## The keys the builders add to the reactive core's.
+##
+## A component body runs under `Ui`, which is `Owner`, from `reactive`, plus
+## `Parent`: the owner that retains what the body creates and the node new
+## nodes are appended to. An eager signal read inside a component, whose
+## row is `$ Ui`, is a compile error because `Ui` holds no `Track`.
+use dep.reactive.{Owner, OwnerId}
+
+## A host node. Node 0 is the mount point the host provides.
+pub type NodeId = usize
+## An event handler the runtime registered. Handler 0 means "stop".
+pub type HandlerId = usize
+
+## The row of a component body.
+pub type Ui = $ Owner + Parent
+
+## Installed while a component body runs: the node new nodes go under.
+pub trait Parent:
+    fn parent(&self) -> NodeId
+
+## The provider of both keys of `Ui`: one owner and one parent node,
+## installed as `Owner=scope, Parent=scope`.
+pub struct Scope:
+    pub owner: OwnerId
+    pub parent: NodeId
+
+impl Owner for Scope:
+    fn owner(&self) -> OwnerId:
+        self.owner
+
+impl Parent for Scope:
+    fn parent(&self) -> NodeId:
+        self.parent

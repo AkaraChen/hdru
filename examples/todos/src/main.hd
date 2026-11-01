@@ -2,7 +2,6 @@ use dep.ui.{
     Mutate,
     ReadSignal,
     Signal,
-    Surface,
     Ui,
     attr_live,
     button,
@@ -12,12 +11,12 @@ use dep.ui.{
     memo,
     on,
     row,
-    run_app,
     show,
     signal,
     text,
     text_live,
 }
+use dep.ui_dom.{Surface, run_app}
 
 @derive(Eq)
 struct Todo:

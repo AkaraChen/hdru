@@ -1,4 +1,16 @@
-use pkg.{DomCommand, Resource, Surface, Ui, reset_for_test, resource_with, run_app, scripted, signal, text_live}
+use pkg.{
+    DomCommand,
+    Resource,
+    Ui,
+    mount,
+    reset_for_test,
+    resource_with,
+    run_job,
+    signal,
+    take_commands,
+    take_new_jobs,
+    text_live,
+}
 use std.convert.From
 use std.task.{Backoff, TimedOut, retry, timeout, with_timeout}
 use std.time.{Clock, ManualClock, Timestamp, ms}
@@ -12,6 +24,17 @@ enum LoadError:
 impl From[TimedOut] for LoadError:
     fn from(value: TimedOut) -> LoadError:
         .Slow
+
+## Runs every job registered so far, and any they register, then returns
+## what they emitted.
+fn run_pending!() -> List[DomCommand]:
+    while true:
+        ids := take_new_jobs()
+        if ids.is_empty():
+            break
+        for id in ids:
+            run_job!(id)
+    take_commands()
 
 struct Attempts:
     count: usize
@@ -40,24 +63,25 @@ it("retry runs the loader again after a failure, waiting on the clock"):
     reset_for_test()
     attempts := box(Attempts { count: 0 })
     clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
-    recorder := scripted([])
-    $.with(Clock=clock, Surface=recorder):
-        run_app!(fn() -> void $ Ui + Clock: flaky_profile(attempts, 3))
+    $.with(Clock=clock):
+        _ := mount(fn() -> void $ Ui + Clock: flaky_profile(attempts, 3))
+    _ := take_commands()
+    landed := run_pending!()
     assert_equal(attempts.count, 3, reason="two failures, then success")
     assert_equal(clock.now().unix_milliseconds(), 300, reason="backoff waited 100ms, then 200ms")
-    assert_equal(recorder.log.get(3), .Some(DomCommand.SetText(1, "ready: user 1")), reason="landed")
+    assert_equal(landed, [DomCommand.SetText(1, "ready: user 1")], reason="landed")
 
 it("a loader that keeps failing lands its last error"):
     reset_for_test()
     attempts := box(Attempts { count: 0 })
     clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
-    recorder := scripted([])
-    $.with(Clock=clock, Surface=recorder):
-        run_app!(fn() -> void $ Ui + Clock: flaky_profile(attempts, 99))
+    $.with(Clock=clock):
+        _ := mount(fn() -> void $ Ui + Clock: flaky_profile(attempts, 99))
+    _ := take_commands()
+    landed := run_pending!()
     assert_equal(attempts.count, 3, reason="three attempts, as the backoff says")
     assert_equal(
-        recorder.log.get(3),
-        .Some(DomCommand.SetText(1, "failed: attempt 3")),
+        landed, [DomCommand.SetText(1, "failed: attempt 3")],
         reason="the last error",
     )
 
@@ -77,12 +101,11 @@ fn slow_profile() -> void $ Ui + Clock:
 
 it("a loader slower than its timeout lands as Failed"):
     reset_for_test()
-    recorder := scripted([])
-    $.with(Surface=recorder):
-        run_app!(slow_profile)
+    _ := mount(slow_profile)
+    _ := take_commands()
+    landed := run_pending!()
     assert_equal(
-        recorder.log.get(3),
-        .Some(DomCommand.SetText(1, "failed: too slow")),
+        landed, [DomCommand.SetText(1, "failed: too slow")],
         reason="the deadline won",
     )
 
@@ -103,8 +126,9 @@ it("policies compose: a deadline around a retry"):
     reset_for_test()
     attempts := box(Attempts { count: 0 })
     clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
-    recorder := scripted([])
-    $.with(Clock=clock, Surface=recorder):
-        run_app!(fn() -> void $ Ui + Clock: composed_profile(attempts))
+    $.with(Clock=clock):
+        _ := mount(fn() -> void $ Ui + Clock: composed_profile(attempts))
+    _ := take_commands()
+    landed := run_pending!()
     assert_equal(attempts.count, 2, reason="one retry inside the deadline")
-    assert_equal(recorder.log.get(3), .Some(DomCommand.SetText(1, "ready: user 2")), reason="landed")
+    assert_equal(landed, [DomCommand.SetText(1, "ready: user 2")], reason="landed")

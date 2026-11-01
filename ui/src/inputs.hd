@@ -3,10 +3,9 @@
 ## a write from elsewhere is sent to the control as a `SetAttr`, except the
 ## value the control already shows, so a keystroke is never echoed back.
 use std.function.FnMut
-use pkg.keys.{Mutate, NodeId, OwnerId, Reactive, Track, Ui}
-use pkg.graph.{Computation, new_computation, run_computation}
-use pkg.reactive.Signal
-use pkg.runtime.{create_node, emit, last_node, mark_built}
+use dep.reactive.{Mutate, Owner, OwnerId, Reactive, Signal, Track, run_effect}
+use pkg.keys.{NodeId, Parent, Ui}
+use pkg.runtime.{built_last, create_node, emit, mark_built}
 use pkg.builders.listen
 
 # What the control shows now: the last value sent to it or typed into it.
@@ -17,9 +16,8 @@ struct Shown:
 ## `value` on each `input` event; writing `value` elsewhere, say clearing
 ## it after a submit, updates the field.
 pub fn input(value: Signal[string], class: string = "") -> void $ Ui:
-    ui := $.use(Ui)
-    owner := ui.owner()
-    node := control(ui.parent(), "text", class)
+    owner := $.use(Owner).owner()
+    node := control($.use(Parent).parent(), "text", class)
     initial := value.peek()
     emit(.SetAttr(node, "value", initial))
     shown := box(Shown { text: initial })
@@ -44,9 +42,8 @@ pub fn input(value: Signal[string], class: string = "") -> void $ Ui:
 ## A checkbox bound to `checked`, over the `change` event, whose payload
 ## the host sends as `"true"` or `"false"`.
 pub fn checkbox(checked: Signal[bool], class: string = "") -> void $ Ui:
-    ui := $.use(Ui)
-    owner := ui.owner()
-    node := control(ui.parent(), "checkbox", class)
+    owner := $.use(Owner).owner()
+    node := control($.use(Parent).parent(), "checkbox", class)
     initial := checked.peek()
     emit(.SetAttr(node, "checked", "$initial"))
     shown := box(Shown { text: "$initial" })
@@ -81,7 +78,7 @@ pub fn checkbox(checked: Signal[bool], class: string = "") -> void $ Ui:
 ##     on("enter", fn(text: string) -> void $ Mutate: query.set(""))
 ## ```
 pub fn on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Ui:
-    listen($.use(Ui).owner(), last_node(), event, fn(payload: string) -> void $ Mutate: handler(payload))
+    listen($.use(Owner).owner(), built_last(), event, fn(payload: string) -> void $ Mutate: handler(payload))
 
 fn control(parent: NodeId, kind: string, class: string) -> NodeId:
     node := create_node("input")
@@ -93,15 +90,4 @@ fn control(parent: NodeId, kind: string, class: string) -> NodeId:
 
 # Runs `run` as an effect of `owner`, now and after each change.
 fn follow_effect[F < 'static & FnMut() -> bool $ Reactive](owner: OwnerId, mut run: F) -> void:
-    erased := fn() -> bool $ Reactive: run()
-    computation := new_computation(
-        Computation {
-            run: erased,
-            kind: .Effect,
-            state: .Dirty,
-            deps: [],
-            owner: owner,
-            source: .None,
-        },
-    )
-    run_computation(computation)
+    _ := run_effect(owner, fn() -> bool $ Reactive: run())

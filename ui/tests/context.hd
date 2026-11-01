@@ -1,4 +1,5 @@
 use pkg.{
+    Parent,
     Provided,
     Signal,
     Track,
@@ -120,7 +121,7 @@ fn palette_text() -> void $ Ui + Palette:
     text("${$.use(Palette).name()} under ${parent_node()}")
 
 fn parent_node() -> usize $ Ui:
-    $.use(Ui).parent()
+    $.use(Parent).parent()
 
 it("a typed key reaches a component through two columns"):
     reset_for_test()

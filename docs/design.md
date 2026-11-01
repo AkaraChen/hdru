@@ -353,6 +353,64 @@ end of the phase) plus `node --test providers/dom.test.mjs`.
     compile-fail example must make the outer function's row explicit
     (`fn app() -> void $ Ui`) or the error never appears.
 
+## Phase 11: the package split (2026-11-02)
+
+Implements `packages.md`. The root `hd.toml` is a `[workspace]` of
+`reactive`, `ui`, `ui-dom` and the three examples. Gate met: `hd test` at
+the root runs the same 55 cases (15 in `reactive`, 37 in `ui`, 3 in
+`ui-dom`); `hd test -p reactive` and `-p ui` pass with no `[host]` table
+in either package; the three examples print byte-identical output under
+Node against the checkpoint `8ce8304`; `web/build.sh` rebuilds, and in a
+real browser the todos page adds a typed todo and the fetcher loads.
+
+- **`Ui` became a row alias: `type Ui = $ Owner + Parent`.** `packages.md`
+  puts `Ui` in `ui`, but `memo`, `effect`, `sync`, `on_cleanup`,
+  `provide` and `resource` all read the current owner through
+  `$.use(Ui).owner()`, and `reactive` cannot depend on `ui`. So
+  `reactive` declares the key `Owner` (`fn owner`), with the provider
+  `OwnedBy`, and `ui` declares `Parent` (`fn parent`) and the alias. Every
+  `$ Ui` row in user code is unchanged, because an alias expands before
+  row solving (`req.row.alias.expand.first`). Internally an alias is not a
+  key, so every `$.use(Ui)` became `$.use(Owner)` or `$.use(Parent)` and
+  every `$.with(Ui=...)` names the keys it changes: containers install
+  `Parent` only, `owned` and `root` `Owner` only, and `mount`, `show` and
+  `for_each` rows both, from one `Scope` that implements both traits. The
+  graph's own record struct was renamed `OwnerRecord`. `reactive`'s
+  functions now have rows `$ Owner`, which a `$ Ui` caller satisfies.
+- **`reactive`'s low-level API.** Exported: `Computation`, `Kind`,
+  `State`, `new_computation`, `run_computation`, `new_owner`, `dispose`,
+  `flush`, `cleanup_on(owner, action)`, and two additions:
+  `run_effect(owner, run)`, which makes an effect computation and runs it
+  (the six copies of that block in the builders collapsed into it), and
+  `reset_graph_for_test`, which `ui`'s `reset_for_test` calls. `graph()`
+  is not exported; no file in `ui` touches the graph directly.
+- **`ui`'s runtime** keeps everything synchronous plus `run_job!`.
+  `take_new_jobs()` replaces the loop's direct read of the unposted list,
+  and the runtime struct is now private. `run_jobs!` is gone: `ui`'s
+  tests run `take_new_jobs` / `run_job!` / `take_commands` in a small
+  `run_pending!` helper, and `tests/policy.hd` mounts under the clock
+  instead of running `run_app!`. The runtime accessor for the last built
+  node is `built_last()`, so it does not collide with the public
+  `last_node()` builder.
+- **`ui-dom`** holds `surface.hd` (the four-method trait), `app.hd`
+  (`send!`, the event loop, the pool with its own live-worker counter,
+  `run_app!`), `recorder.hd`, and `providers/`. Its `hd.toml` has the
+  `[host]` table and `Clock` in `[dev-capabilities]` for the moved run_app
+  case of `tests/resource.hd`. The two cases that exercise `run_app!`
+  itself (the suspending loader, payloads through the loop) moved from
+  `ui`'s tests into `ui-dom/tests/loop.hd`, which is why `ui` has 37 and
+  not 39.
+- **Tests by package.** `core` and `rows` went to `reactive`; `rows.hd`
+  dropped its unused `pkg.Surface` import, which a `[host]`-less package no
+  longer needs. `context.hd` went to `ui`, not `reactive` as `packages.md`
+  says, because it mounts builders.
+- **Manifests.** `[package]` takes no `version` key
+  (`unknown-manifest-key`); versions come from tags. Path requirements
+  carry `version = "0.1.0"` as planned. Each package writes its own
+  `build/`, so `.gitignore` now ignores `build/` at any depth.
+- The surface file in `ui` is `protocol.hd`, not `surface.hd`, since the
+  trait it was named for moved out.
+
 ## Superseded: attributes and styles (2026-11-02, old phase 11)
 
 Built under the first numbering of `roadmap.md`, where phase 11 was

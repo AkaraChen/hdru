@@ -2,7 +2,8 @@
 name = "counter"
 
 [dependencies]
-ui = { path = "../.." }
+ui = { path = "../../ui", version = "0.1.0" }
+ui-dom = { path = "../../ui-dom", version = "0.1.0" }
 
 [capabilities]
-"dep.ui.surface.Surface" = true
+"dep.ui_dom.surface.Surface" = true

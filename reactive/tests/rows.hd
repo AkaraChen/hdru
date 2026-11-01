@@ -2,10 +2,6 @@
 # kept as the first test of row-polymorphic builders. Its `Ui` is a
 # stand-in with a depth counter; the library's `Scope` takes its place.
 use std.testing.assert_equal
-# A test module that imports nothing from the package fails to build with
-# `invalid-manifest` for the `surface.Surface` host entry, so it imports one
-# item it does not use.
-use pkg.Surface
 
 trait Ui:
     fn depth(self) -> i32

@@ -1,21 +1,21 @@
 ## Owner-tree context: a value an ancestor provides by key, found by any
 ## descendant. The value is boxed once; every reader shares it.
 use std.inspect.Inspectable
-use pkg.keys.{OwnerId, Ui}
+use pkg.keys.{Owner, OwnerId}
 use pkg.graph.graph
 
 ## Makes `value` available under `key` to the current owner's subtree.
-pub fn provide[T < 'static & Inspectable](key: string, value: T) -> void $ Ui:
-    owner := $.use(Ui).owner()
+pub fn provide[T < 'static & Inspectable](key: string, value: T) -> void $ Owner:
+    owner := $.use(Owner).owner()
     graph().owners[owner].context[key] = box(value)
 
 ## Finds the nearest `key` provided by the current owner or an ancestor
 ## and returns a copy of it as a `T`, or `.None` when no ancestor provided
 ## it or it holds another type. To share state through context, provide
 ## a handle such as a `Signal`.
-pub fn use_context[T < 'static & Inspectable](key: string) -> T? $ Ui:
+pub fn use_context[T < 'static & Inspectable](key: string) -> T? $ Owner:
     g := graph()
-    let cursor: OwnerId? = .Some($.use(Ui).owner())
+    let cursor: OwnerId? = .Some($.use(Owner).owner())
     let found: T? = .None
     while found.is_none():
         owner := match cursor:

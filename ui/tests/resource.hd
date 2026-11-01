@@ -1,8 +1,6 @@
 use pkg.{
     DomCommand,
-    Recorder,
     Resource,
-    Surface,
     Ui,
     UiEvent,
     button,
@@ -11,16 +9,14 @@ use pkg.{
     mount,
     reset_for_test,
     resource,
-    run_app,
-    run_jobs,
-    scripted,
+    run_job,
     show,
     signal,
     take_commands,
+    take_new_jobs,
     text_live,
 }
 use std.testing.assert_equal
-use std.time.{Clock, ManualClock, Timestamp, ms}
 
 fn describe(state: Resource[string, string]) -> string:
     match state:
@@ -45,6 +41,17 @@ fn profile() -> void $ Ui:
         )
         button("bad", fn(): id.set(-1))
 
+## Runs every job registered so far, and any they register, then returns
+## what they emitted: what a worker pool would do, on the test task.
+fn run_pending!() -> List[DomCommand]:
+    while true:
+        ids := take_new_jobs()
+        if ids.is_empty():
+            break
+        for id in ids:
+            run_job!(id)
+    take_commands()
+
 fn click(handler: usize) -> List[DomCommand]:
     dispatch(UiEvent { handler: handler, payload: "" })
     take_commands()
@@ -54,29 +61,20 @@ it("a resource is Loading until its job runs, then Ready"):
     _ := mount(profile)
     commands := take_commands()
     assert_equal(commands.contains(.SetText(2, "loading")), true, reason="loading at mount")
-    recorder := scripted([])
-    $.with(Surface=recorder):
-        run_jobs!()
-    assert_equal(recorder.log, [.SetText(2, "ready: user 1")], reason="the loader's value landed")
+    assert_equal(run_pending!(), [.SetText(2, "ready: user 1")], reason="the loader's value landed")
 
 it("a key change reloads, drops the stale job, and a failure lands as Failed"):
     reset_for_test()
     _ := mount(profile)
     _ := take_commands()
     assert_equal(click(1), [], reason="still loading: same text, no command")
-    recorder := scripted([])
-    $.with(Surface=recorder):
-        run_jobs!()
-    assert_equal(recorder.log, [.SetText(2, "ready: user 2")], reason="only the job for key 2 ran")
+    assert_equal(run_pending!(), [.SetText(2, "ready: user 2")], reason="only the job for key 2 ran")
     assert_equal(click(1), [.SetText(2, "loading")], reason="a new key goes back to loading")
     assert_equal(click(2), [], reason="bad key: already loading")
-    $.with(Surface=recorder):
-        run_jobs!()
-    assert_equal(recorder.log.len(), 2, reason="one more landing")
     assert_equal(
-        recorder.log.get(1),
-        .Some(DomCommand.SetText(2, "failed: negative id -1")),
-        reason="the failure",
+        run_pending!(),
+        [.SetText(2, "failed: negative id -1")],
+        reason="one more landing: the failure",
     )
 
 fn gated() -> void $ Ui:
@@ -96,36 +94,4 @@ it("disposing the owner drops a queued job"):
     _ := mount(gated)
     _ := take_commands()
     assert_equal(click(1), [.Clear(3)], reason="hidden")
-    recorder := scripted([])
-    $.with(Surface=recorder):
-        run_jobs!()
-    assert_equal(recorder.log, [], reason="the branch's job never ran")
-
-fn slow_profile() -> void $ Ui + Clock:
-    let clock: *mut dyn Clock = $.use(Clock)
-    id := signal(+7)
-    user := resource(
-        fn(): id.get(),
-        fn!(key: i32) -> Result[string, string]:
-            clock.sleep!(ms(50))
-            .Ok("slow user $key")
-        ,
-    )
-    text_live:
-        describe(user.get())
-
-it("a loader that suspends lands through the workers of run_app"):
-    reset_for_test()
-    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
-    recorder := scripted([])
-    $.with(Clock=clock, Surface=recorder):
-        run_app!(slow_profile)
-    assert_equal(recorder.jobs, [], reason="the posted job and every stop marker were taken")
-    log := recorder.log
-    assert_equal(log.get(2), .Some(DomCommand.SetText(1, "loading")), reason="mount")
-    assert_equal(
-        log.get(3),
-        .Some(DomCommand.SetText(1, "ready: slow user 7")),
-        reason="a worker drove the sleeping loader and sent its landing",
-    )
-    assert_equal(log.len(), 4, reason="nothing else")
+    assert_equal(run_pending!(), [], reason="the branch's job never ran")

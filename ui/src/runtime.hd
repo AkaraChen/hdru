@@ -1,34 +1,32 @@
 ## The program-wide UI runtime: the pending command list, the handler
-## table, and the id counters. `mount` builds a tree; `dispatch` routes
-## one event to its handler and flushes.
+## table, the job table and the id counters. `mount` builds a tree;
+## `dispatch` routes one event to its handler and flushes. Everything here
+## is synchronous except `run_job!`; a renderer package such as `ui-dom`
+## supplies the loop that moves commands, events and jobs across a host.
 use std.function.FnMut
-use std.task.all
-use pkg.keys.{HandlerId, Mutate, NodeId, NoTrack, OwnerId, Scope, SourceId, Track, Ui, WriteLog}
-use pkg.graph.{flush, graph, new_owner}
-use pkg.reactive.batch
-use pkg.surface.{DomCommand, Surface, UiEvent}
+use dep.reactive.{Mutate, NoTrack, Owner, OwnerId, SourceId, Track, WriteLog, batch, flush, new_owner, reset_graph_for_test}
+use pkg.keys.{HandlerId, NodeId, Parent, Scope, Ui}
+use pkg.protocol.{DomCommand, UiEvent}
 
 ## A resource load waiting for a worker: a cold suspension that drives
 ## the loader and lands its result.
 pub struct Job:
     pub task: mut Suspend[void]
 
-pub struct Runtime:
-    pub out: List[DomCommand]
-    pub handlers: Map[HandlerId, fn(string) -> void $ Mutate]
-    pub next_node: usize
-    pub next_handler: usize
+struct Runtime:
+    out: List[DomCommand]
+    handlers: Map[HandlerId, fn(string) -> void $ Mutate]
+    next_node: usize
+    next_handler: usize
     ## Jobs by id, until a worker takes one.
-    pub jobs: Map[usize, Job]
-    ## Ids registered since the loop last told the host about them.
-    pub unposted: List[usize]
-    pub next_job: usize
-    ## Workers started by `run_app!` and not yet stopped.
-    pub live_workers: usize
+    jobs: Map[usize, Job]
+    ## Ids registered since the loop last took them.
+    unposted: List[usize]
+    next_job: usize
     ## The node of the builder that finished last, for `attr`.
-    pub last_node: NodeId
+    last_node: NodeId
     ## The sources the last dispatched handler wrote.
-    pub last_writes: List[SourceId]
+    last_writes: List[SourceId]
 
 RUNTIME := box(
     Runtime {
@@ -39,13 +37,12 @@ RUNTIME := box(
         jobs: {},
         unposted: [],
         next_job: 1,
-        live_workers: 0,
         last_node: 0,
         last_writes: [],
     },
 )
 
-pub fn runtime() -> *mut Runtime:
+fn runtime() -> *mut Runtime:
     RUNTIME
 
 ## Queues one command for the next `take_commands`.
@@ -65,7 +62,7 @@ pub fn mark_built(node: NodeId) -> void:
     runtime().last_node = node
 
 ## The node `mark_built` recorded last.
-pub fn last_node() -> NodeId:
+pub fn built_last() -> NodeId:
     runtime().last_node
 
 ## Registers a handler and returns its id.
@@ -80,8 +77,8 @@ pub fn register_handler[F < 'static & FnMut(string) -> void $ Mutate](mut handle
 pub fn drop_handler(id: HandlerId) -> void:
     _ := runtime().handlers.remove(id)
 
-## Registers a job and returns its id. The loop or a worker posts it to
-## the host at its next turn.
+## Registers a job and returns its id. The loop takes it with
+## `take_new_jobs` and hands it to a worker.
 pub fn register_job(task: mut Suspend[void]) -> usize:
     rt := runtime()
     id := rt.next_job
@@ -103,6 +100,24 @@ pub fn take_commands() -> List[DomCommand]:
     rt.out = []
     commands
 
+## Drains and returns the ids of the jobs registered since the last call,
+## for the loop to hand to its workers.
+pub fn take_new_jobs() -> List[usize]:
+    rt := runtime()
+    ids := rt.unposted
+    rt.unposted = []
+    ids
+
+## Runs one registered job on the current task: drives the loader and
+## lands its result. A job a `drop_job` removed is skipped.
+pub fn run_job!(id: usize) -> void:
+    found := runtime().jobs.remove(id)
+    match found:
+        .Some(job) =>
+            let mut task = job.task
+            task!()
+        .None => pass
+
 ## Builds `root` under a fresh owner, appending to node 0, and flushes.
 ## Returns the owner so the tree can be disposed. A root that needs other
 ## providers, say `$ Ui + Clock` to capture a clock for a loader, names
@@ -120,7 +135,8 @@ pub fn take_commands() -> List[DomCommand]:
 ## ```
 pub fn mount[$ R](root: fn() -> void $ Ui + R) -> OwnerId $ R:
     owner := new_owner(.None)
-    $.with(Ui=box(Scope { owner: owner, parent: 0 }), Track=box(NoTrack {})):
+    scope := box(Scope { owner: owner, parent: 0 })
+    $.with(Owner=scope, Parent=scope, Track=box(NoTrack {})):
         root()
     flush()
     owner
@@ -146,8 +162,8 @@ pub fn dispatch(event: UiEvent) -> void:
 pub fn last_writes() -> List[SourceId]:
     runtime().last_writes
 
-## Resets ids and clears the queues and the handler table. For tests that
-## assert exact command lists.
+## Resets ids, clears the queues and the handler table, and empties the
+## reactive graph. For tests that assert exact command lists.
 pub fn reset_for_test() -> void:
     rt := runtime()
     rt.out = []
@@ -157,94 +173,6 @@ pub fn reset_for_test() -> void:
     rt.jobs = {}
     rt.unposted = []
     rt.next_job = 1
-    rt.live_workers = 0
     rt.last_node = 0
     rt.last_writes = []
-    g := graph()
-    g.sources = {}
-    g.computations = {}
-    g.owners = {}
-    g.next_id = 1
-    g.effects = []
-    g.flushing = false
-    g.batch_depth = 0
-
-fn send!() -> void $ Surface:
-    commands := take_commands()
-    if !commands.is_empty():
-        $.use(Surface).apply!(commands)
-    rt := runtime()
-    ids := rt.unposted
-    rt.unposted = []
-    for id in ids:
-        $.use(Surface).post_job(id)
-
-## Runs one registered job on the current task: drives the loader and
-## lands its result. A job a `drop_job` removed is skipped.
-pub fn run_job!(id: usize) -> void:
-    rt := runtime()
-    found := rt.jobs.remove(id)
-    match found:
-        .Some(job) =>
-            let mut task = job.task
-            task!()
-        .None => pass
-
-## Runs every job registered so far on the current task, in order, and
-## sends what they emitted. For tests under `Recorder`, whose `next_job!`
-## never waits.
-pub fn run_jobs!() -> void $ Surface:
-    while true:
-        rt := runtime()
-        ids := rt.unposted
-        rt.unposted = []
-        if ids.is_empty():
-            break
-        for id in ids:
-            run_job!(id)
-    send!()
-
-fn event_loop!() -> void $ Surface:
-    while true:
-        event := $.use(Surface).next_event!()
-        if event.handler == 0:
-            break
-        dispatch(event)
-        send!()
-    $.use(Surface).post_job(0)
-
-# A worker that takes the stop marker passes it on to the next one while
-# any is left, so the event loop posts one 0 however many workers run.
-fn worker!() -> void $ Surface:
-    while true:
-        id := $.use(Surface).next_job!()
-        if id == 0:
-            break
-        run_job!(id)
-        send!()
-    rt := runtime()
-    rt.live_workers -= 1
-    if rt.live_workers > 0:
-        $.use(Surface).post_job(0)
-
-# Counts a worker as live when its cold suspension is made, before any
-# task runs, so the stop marker knows how many to reach.
-fn started() -> mut Suspend[void] $ Surface:
-    runtime().live_workers += 1
-    worker()
-
-# The pool: four workers, so at most four loads are in flight at once.
-# The count is the number of arguments because `all!` has fixed arity and
-# no task can wait on another (hd-lang#1164), so the pool is not a loop.
-fn workers!() -> void $ Surface:
-    _ := all!(started(), started(), started(), started())
-
-## Mounts `root`, sends its commands, then runs the event loop beside a
-## pool of workers until the host sends handler 0: each event is
-## dispatched and its changes sent; each resource load runs on a worker
-## and lands its result when the loader completes. Returns when the loop
-## has ended and every worker has stopped.
-pub fn run_app![$ R](root: fn() -> void $ Ui + R) -> void $ Surface + R:
-    _ := mount(root)
-    send!()
-    _ := all!(event_loop(), workers())
+    reset_graph_for_test()

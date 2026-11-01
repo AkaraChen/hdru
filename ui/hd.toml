@@ -1,0 +1,10 @@
+[package]
+name = "ui"
+
+[dependencies]
+reactive = { path = "../reactive", version = "0.1.0" }
+
+[dev-capabilities]
+# A real clock for tests/policy.hd, whose timeout must actually wait: a
+# ManualClock completes every sleep at once, so a slow loader would win.
+Clock = true

@@ -1,4 +1,5 @@
-use dep.ui.{Surface, Ui, attr, button, column, row, run_app, signal, text_live}
+use dep.ui.{Ui, attr, button, column, row, signal, text_live}
+use dep.ui_dom.{Surface, run_app}
 
 fn counter() -> void $ Ui:
     count := signal(+0)

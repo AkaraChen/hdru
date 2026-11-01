@@ -1,5 +1,6 @@
-## The host boundary: the commands the runtime sends and the events it
-## receives, and the package-owned host trait that carries them.
+## The renderer protocol: the commands the runtime sends and the events it
+## receives. A renderer package (`ui-dom`) declares the host trait that
+## carries them.
 use pkg.keys.{HandlerId, NodeId}
 
 @derive(Eq, Debug)
@@ -24,16 +25,3 @@ pub struct UiEvent:
     pub handler: HandlerId
     ## The input value for an input event; empty for a click.
     pub payload: string
-
-## What a host must provide. `apply!` consumes one batch of commands and
-## `next_event!` waits for the next user event; a handler of 0 ends the
-## event loop. `post_job` and `next_job!` are a queue of job ids that the
-## runtime uses to hand resource loads to its worker tasks: a worker
-## waits in `next_job!` until something was posted, and a job of 0 tells
-## it to stop.
-@host
-pub trait Surface:
-    fn apply!(&mut self, commands: List[DomCommand]) -> void
-    fn next_event!(&mut self) -> UiEvent
-    fn post_job(&mut self, job: usize) -> void
-    fn next_job!(&mut self) -> usize

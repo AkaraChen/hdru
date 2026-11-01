@@ -1,0 +1,34 @@
+## Owners: who retains computations and when they are disposed.
+use std.function.FnMut
+use pkg.keys.{Mutate, NoTrack, OwnedBy, Owner, OwnerId, Scheduler, Track}
+use pkg.graph.{cleanup_on, new_owner}
+
+## Runs `body` under a fresh root owner with `Owner`, `Track` and `Mutate`
+## installed, and returns the owner so the caller can `dispose` it. Any
+## other key `body` names is the caller's to provide.
+pub fn root[$R](body: fn() -> void $ Owner + Track + Mutate + R) -> OwnerId $ R:
+    owner := new_owner(.None)
+    $.with(
+        Owner=box(OwnedBy { owner: owner }),
+        Track=box(NoTrack {}),
+        Mutate=box(Scheduler { writes: 0 }),
+    ):
+        body()
+    owner
+
+## Runs `body` under a child of the current owner. This is a component
+## boundary: what `body` creates or provides is disposed with the child,
+## and `provide` inside it shadows the outer value only for `body`. Every
+## other key of the caller, `ui`'s `Parent` among them, passes through.
+pub fn owned[$R](body: fn() -> void $ Owner + R) -> void $ Owner + R:
+    owner := new_owner(.Some($.use(Owner).owner()))
+    $.with(Owner=box(OwnedBy { owner: owner })):
+        body()
+
+## Registers `action` to run when the current owner is disposed.
+pub fn on_cleanup[F < 'static & FnMut() -> void](mut action: F) -> void $ Owner:
+    cleanup_on($.use(Owner).owner(), fn() -> void: action())
+
+## The current owner.
+pub fn current_owner() -> OwnerId $ Owner:
+    $.use(Owner).owner()

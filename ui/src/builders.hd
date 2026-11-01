@@ -1,10 +1,10 @@
-## Node builders. Each reads `$.use(Ui)` into locals and never captures it;
-## a nested block runs under a fresh `Scope` whose parent is the new node.
+## Node builders. Each reads `$.use(Owner)` and `$.use(Parent)` into locals
+## and never captures them; a container runs its block under a fresh
+## `Parent` that names the new node.
 use std.function.{Fn, FnMut}
-use pkg.keys.{Mutate, Reactive, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
-use pkg.graph.{Computation, dispose, graph, new_computation, new_owner, run_computation}
-use pkg.runtime.{create_node, drop_handler, emit, mark_built, register_handler}
-use pkg.runtime as rt
+use dep.reactive.{Mutate, NoTrack, Owner, OwnerId, Reactive, Track, cleanup_on, dispose, new_owner, run_effect}
+use pkg.keys.{NodeId, Parent, Scope, Ui}
+use pkg.runtime.{built_last, create_node, drop_handler, emit, mark_built, register_handler}
 
 struct Last:
     text: string
@@ -20,15 +20,14 @@ fn container[$R](
     gap: i32,
     children: fn() -> void $ Ui + R,
 ) -> void $ Ui + R:
-    ui := $.use(Ui)
-    owner := ui.owner()
-    parent := ui.parent()
+    owner := $.use(Owner).owner()
+    parent := $.use(Parent).parent()
     node := create_node("div")
     emit(.SetAttr(node, "class", classes(kind, class)))
     if gap > 0:
         emit(.SetAttr(node, "style", "gap:${gap}px"))
     emit(.Append(parent, node))
-    $.with(Ui=box(Scope { owner: owner, parent: node })):
+    $.with(Parent=box(Scope { owner: owner, parent: node })):
         children()
     mark_built(node)
 
@@ -76,7 +75,7 @@ pub fn row[$R](
 
 ## Static text, with an optional `class`.
 pub fn text(content: string, class: string = "") -> void $ Ui:
-    parent := $.use(Ui).parent()
+    parent := $.use(Parent).parent()
     node := create_node("text")
     set_class(node, class)
     emit(.Append(parent, node))
@@ -89,9 +88,8 @@ pub fn text(content: string, class: string = "") -> void $ Ui:
 ## positional argument cannot skip a default; follow it with
 ## `attr("class", ...)` instead.
 pub fn text_live[F < 'static & Fn() -> string $ Track](compute: F) -> void $ Ui:
-    ui := $.use(Ui)
-    owner := ui.owner()
-    parent := ui.parent()
+    owner := $.use(Owner).owner()
+    parent := $.use(Parent).parent()
     node := create_node("text")
     emit(.Append(parent, node))
     follow(owner, compute, fn(next: string) -> void: emit(.SetText(node, next)))
@@ -112,17 +110,7 @@ fn follow[F < 'static & Fn() -> string $ Track, W < 'static & Fn(string) -> void
             last.text = next
             write(next)
         false
-    computation := new_computation(
-        Computation {
-            run: run,
-            kind: .Effect,
-            state: .Dirty,
-            deps: [],
-            owner: owner,
-            source: .None,
-        },
-    )
-    run_computation(computation)
+    _ := run_effect(owner, run)
 
 ## A button. The handler may write signals but not read them tracked; use
 ## `peek` or `update`. `class` comes after the handler and is named:
@@ -132,9 +120,8 @@ pub fn button[F < 'static & FnMut() -> void $ Mutate](
     mut on_click: F,
     class: string = "",
 ) -> void $ Ui:
-    ui := $.use(Ui)
-    owner := ui.owner()
-    parent := ui.parent()
+    owner := $.use(Owner).owner()
+    parent := $.use(Parent).parent()
     node := create_node("button")
     set_class(node, class)
     emit(.Append(parent, node))
@@ -151,7 +138,7 @@ pub fn listen[F < 'static & FnMut(string) -> void $ Mutate](
 ) -> void:
     id := register_handler(fn(payload: string) -> void $ Mutate: handler(payload))
     emit(.Listen(node, event, id))
-    graph().owners[owner].cleanups.push(fn() -> void: drop_handler(id))
+    cleanup_on(owner, fn() -> void: drop_handler(id))
 
 ## Mounts `branch` while `when` is true and disposes it when it turns
 ## false. The branch keeps its place: it renders into a fragment node that
@@ -160,9 +147,8 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
     when: C,
     branch: F,
 ) -> void $ Ui:
-    ui := $.use(Ui)
-    owner := ui.owner()
-    parent := ui.parent()
+    owner := $.use(Owner).owner()
+    parent := $.use(Parent).parent()
     fragment := create_node("div")
     emit(.SetAttr(fragment, "class", "show"))
     emit(.Append(parent, fragment))
@@ -178,21 +164,12 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
             .None =>
                 if visible:
                     child := new_owner(.Some(owner))
-                    $.with(Ui=box(Scope { owner: child, parent: fragment }), Track=box(NoTrack {})):
+                    scope := box(Scope { owner: child, parent: fragment })
+                    $.with(Owner=scope, Parent=scope, Track=box(NoTrack {})):
                         branch()
                     shown.child = .Some(child)
         false
-    computation := new_computation(
-        Computation {
-            run: run,
-            kind: .Effect,
-            state: .Dirty,
-            deps: [],
-            owner: owner,
-            source: .None,
-        },
-    )
-    run_computation(computation)
+    _ := run_effect(owner, run)
     mark_built(fragment)
 
 ## The node the builder that finished last made: a `text` or `button`, or
@@ -200,7 +177,7 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
 ## to address a node later; builders return `void` so a component may end
 ## with one.
 pub fn last_node() -> NodeId $ Ui:
-    rt.last_node()
+    built_last()
 
 ## Sets a static attribute on `last_node()`, so it follows the builder it
 ## applies to:
@@ -222,6 +199,6 @@ pub fn attr(name: string, value: string) -> void $ Ui:
 ## as `text_live` does for text: one `SetAttr` per change and none for an
 ## equal value.
 pub fn attr_live[F < 'static & Fn() -> string $ Track](name: string, compute: F) -> void $ Ui:
-    owner := $.use(Ui).owner()
+    owner := $.use(Owner).owner()
     node := last_node()
     follow(owner, compute, fn(next: string) -> void: emit(.SetAttr(node, name, next)))

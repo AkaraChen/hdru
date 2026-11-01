@@ -4,9 +4,8 @@
 use std.function.Fn
 use std.task.{Layer, apply}
 use std.time.Clock
-use pkg.keys.{Mutate, OwnerId, Reactive, Track, Ui}
-use pkg.graph.{Computation, graph, new_computation, run_computation}
-use pkg.reactive.{ReadSignal, Signal, signal}
+use dep.reactive.{Mutate, Owner, OwnerId, ReadSignal, Reactive, Signal, Track, cleanup_on, run_effect, signal}
+use pkg.keys.Ui
 use pkg.runtime.{drop_job, register_job}
 
 ## What a resource holds: nothing yet, the loaded value, or the loader's
@@ -71,27 +70,16 @@ fn follow_key[
         id := register_job(job(k, mine))
         generation.queued = .Some(id)
         false
-    computation := new_computation(
-        Computation {
-            run: run,
-            kind: .Effect,
-            state: .Dirty,
-            deps: [],
-            owner: owner,
-            source: .None,
-        },
+    _ := run_effect(owner, run)
+    cleanup_on(
+        owner,
+        fn() -> void:
+            generation.current += 1
+            match generation.queued:
+                .Some(stale) => drop_job(stale)
+                .None => pass
+        ,
     )
-    run_computation(computation)
-    graph().owners[owner]
-        .cleanups
-        .push(
-            fn() -> void:
-                generation.current += 1
-                match generation.queued:
-                    .Some(stale) => drop_job(stale)
-                    .None => pass
-            ,
-        )
 
 ## A value that follows `key`: whenever a signal `key` reads changes, the
 ## resource goes back to `Loading` and `load(key())` runs on a worker; its
@@ -108,7 +96,7 @@ pub fn resource[
     KF < 'static & Fn() -> K $ Track,
     L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
 ](key: KF, load: L) -> ReadSignal[Resource[T, E]] $ Ui:
-    owner := $.use(Ui).owner()
+    owner := $.use(Owner).owner()
     state := signal::[Resource[T, E]](.Loading)
     generation := box(Generation { current: 0, queued: .None })
     follow_key(
@@ -149,7 +137,7 @@ pub fn resource_with[
     L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
     P < 'static & Layer[fn!() -> Result[T, E], Wrapped = fn!() -> Result[T, E] $ Clock],
 ](key: KF, load: L, policy: P) -> ReadSignal[Resource[T, E]] $ Ui + Clock:
-    owner := $.use(Ui).owner()
+    owner := $.use(Owner).owner()
     let clock: *mut dyn Clock = $.use(Clock)
     state := signal::[Resource[T, E]](.Loading)
     generation := box(Generation { current: 0, queued: .None })

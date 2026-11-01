@@ -3,9 +3,8 @@
 use std.function.Fn
 use std.format.{Debug, debug}
 use std.hash.Hash
-use pkg.keys.{Mutate, Reactive, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
-use pkg.graph.{Computation, dispose, new_computation, new_owner, run_computation}
-use pkg.reactive.{ReadSignal, Signal, signal}
+use dep.reactive.{Mutate, NoTrack, Owner, OwnerId, ReadSignal, Reactive, Signal, Track, dispose, new_owner, run_effect, signal}
+use pkg.keys.{NodeId, Parent, Scope, Ui}
 use pkg.runtime.{create_node, emit, mark_built}
 
 struct Row[T < 'static]:
@@ -30,9 +29,8 @@ pub fn for_each[
     KF < 'static & Fn(T) -> K,
     R < 'static & Fn(ReadSignal[T]) -> void $ Ui,
 ](items: ReadSignal[List[T]], key: KF, render: R) -> void $ Ui:
-    ui := $.use(Ui)
-    owner := ui.owner()
-    parent := ui.parent()
+    owner := $.use(Owner).owner()
+    parent := $.use(Parent).parent()
     fragment := create_node("div")
     emit(.SetAttr(fragment, "class", "list"))
     emit(.Append(parent, fragment))
@@ -65,7 +63,8 @@ pub fn for_each[
                 node := create_node("div")
                 emit(.SetAttr(node, "class", "item"))
                 emit(.Append(fragment, node))
-                $.with(Ui=box(Scope { owner: child, parent: node }), Track=box(NoTrack {})):
+                scope := box(Scope { owner: child, parent: node })
+                $.with(Owner=scope, Parent=scope, Track=box(NoTrack {})):
                     render(item_signal.read())
                 state.rows[k] = Row { owner: child, node: node, item: item_signal }
                 current.push(k)
@@ -87,15 +86,5 @@ pub fn for_each[
             index += 1
         state.order = current
         false
-    computation := new_computation(
-        Computation {
-            run: run,
-            kind: .Effect,
-            state: .Dirty,
-            deps: [],
-            owner: owner,
-            source: .None,
-        },
-    )
-    run_computation(computation)
+    _ := run_effect(owner, run)
     mark_built(fragment)

@@ -1,8 +1,6 @@
 use pkg.{
     DomCommand,
     Mutate,
-    Recorder,
-    Surface,
     Ui,
     UiEvent,
     button,
@@ -13,7 +11,6 @@ use pkg.{
     mount,
     on,
     reset_for_test,
-    run_app,
     signal,
     take_commands,
     text_live,
@@ -116,24 +113,3 @@ it("checkbox follows change events and writes from elsewhere"):
     assert_equal(commands.contains(.Listen(2, "change", 1)), true, reason="listens for change")
     assert_equal(send(1, "true"), [.SetText(3, "agreed")], reason="checked by the user, not echoed")
     assert_equal(send(2, ""), [.SetAttr(2, "checked", "false"), .SetText(3, "not yet")], reason="reset")
-
-it("run_app carries payloads from the surface to the handler"):
-    reset_for_test()
-    recorder := box(
-        Recorder {
-            log: [],
-            events: [
-                UiEvent { handler: 1, payload: "h" },
-                UiEvent { handler: 1, payload: "hi" },
-                UiEvent { handler: 2, payload: "hi" },
-            ],
-            jobs: [],
-        },
-    )
-    $.with(Surface=recorder):
-        run_app!(form)
-    log := recorder.log
-    assert_equal(log.len(), 25, reason="21 mount commands, then 1, 1 and 2")
-    assert_equal(log.get(21), .Some(DomCommand.SetText(3, "draft: h")), reason="first keystroke")
-    assert_equal(log.get(22), .Some(DomCommand.SetText(3, "draft: hi")), reason="second keystroke")
-    assert_equal(log.get(23), .Some(DomCommand.SetAttr(2, "value", "")), reason="enter clears the field")

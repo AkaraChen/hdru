@@ -1,0 +1,11 @@
+[package]
+name = "ui-dom"
+
+[dependencies]
+ui = { path = "../ui", version = "0.1.0" }
+
+[host]
+"surface.Surface" = "providers/dom.mjs"
+
+[dev-capabilities]
+Clock = true
