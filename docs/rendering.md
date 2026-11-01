@@ -1,10 +1,12 @@
 # Rendering layers and style
 
-Status: design, 2026-11-02. Decides where the renderer boundary sits, what
-crosses it, and how style is expressed so that one hd component tree can
-render to the DOM today and to non-CSS renderers (GPUI-like, custom
-retained trees) later. Probed against `../hd-lang` at `cf5040b4a`; the
-probe is in section 8. `roadmap.md` phase 11 implements this.
+Status: design, 2026-11-02; implemented the same day as roadmap phase 12
+(commit `a3f6f05`), with the deviations in section 9 and their reasons in
+`design.md`. Decides where the renderer boundary sits, what crosses it,
+and how style is expressed so that one hd component tree can render to
+the DOM today and to non-CSS renderers (GPUI-like, custom retained
+trees) later. Probed against `../hd-lang` at `cf5040b4a`; the probe is in
+section 8.
 
 ## 1. Three layers, as React and Solid draw them
 
@@ -40,14 +42,15 @@ the layer 3 key table as far as it can; unknown keys are ignored.
 ```hd
 @derive(Eq, Debug)
 pub enum Command:
-    ## Makes a node of `kind`. The kinds are vocabulary (section 3); a
-    ## renderer treats an unknown kind as "box".
+    ## Makes a node of `kind`: "box", "text", "button", "input",
+    ## "checkbox" or "fragment" (section 3); a renderer treats an unknown
+    ## kind as "box".
     Create(node: NodeId, kind: string)
     Append(parent: NodeId, child: NodeId)
     MoveBefore(parent: NodeId, child: NodeId, before: NodeId?)
     Remove(node: NodeId)
     Clear(node: NodeId)
-    ## The text of a "text" node.
+    ## The text of a "text" or "button" node.
     SetText(node: NodeId, text: string)
     ## Sets or unsets one property. Keys are vocabulary; unknown keys are
     ## ignored. `Unset` removes the property.
@@ -57,11 +60,11 @@ pub enum Command:
 
 @derive(Eq, Debug)
 pub enum PropValue:
-    Number(f32)
-    Text(string)
-    Flag(bool)
-    Paint(Color)
-    Extent(Size)
+    Number(value: f32)
+    Text(value: string)
+    Flag(value: bool)
+    Paint(color: Color)
+    Extent(size: Size)
     Unset
 
 @derive(Eq, Debug)
@@ -73,11 +76,16 @@ pub struct Color:
 
 @derive(Eq, Debug)
 pub enum Size:
-    Px(f32)
-    Pct(f32)
+    Px(value: f32)
+    Pct(value: f32)
     Auto
     Fill
 ```
+
+Enum payload fields are named because they cross the ABI by name: the
+generated glue delivers `{ tag: "Px", fields: { value: 8 } }`, and a
+renderer in any language reads `fields.value`. `rgb(r, g, b)` and
+`rgba(r, g, b, a)` build a `Color`.
 
 Why `PropValue` is typed at all, when React's `props` are untyped: the
 protocol crosses an ABI, and a renderer written in Rust or Go must not
@@ -104,10 +112,12 @@ maps onto CSS without loss.
 
 | kind | DOM | Rule |
 | --- | --- | --- |
-| `box` | `div` with `display:flex; flex-direction:column` | every box is a flex container, column by default, as React Native's `View` |
+| `box` | `div` with `display:flex; flex-direction:column` | every box is a flex container, column by default, as React Native's `View`; the hd builder is `view`, since `box` is hd's allocation builtin |
 | `text` | `span` | holds text only; styled by the text properties |
-| `button` | `button` | a box that emits `click`; kept distinct so the DOM gets its accessibility semantics |
-| `input` | `input` | emits `input` with the value as payload; `value` property |
+| `button` | `button` | a box that emits `click` and takes `SetText`; kept distinct so the DOM gets its accessibility semantics |
+| `input` | `input type=text` | emits `input` with the value as payload; `value` property |
+| `checkbox` | `input type=checkbox` | emits `change` with `"true"` / `"false"`; `checked` property |
+| `fragment` | `div` with `display:contents` | a grouping node that takes no layout of its own; `show` and `for_each` render into one so a branch or a row keeps its place |
 
 ### Events
 
@@ -138,6 +148,7 @@ for `input` and `change`, the key name for `key`.
 | `font_weight` | Number 100..900 | `font-weight` | weight |
 | `font_family` | Text, a token name | resolved by the renderer's theme table | the same |
 | `value` | Text | `input.value` | control value |
+| `checked` | Flag | `input.checked` | checkbox state |
 | `disabled` | Flag | `disabled` | interaction off |
 
 Not in version 1: grid, absolute positioning, transforms, animation,
@@ -180,28 +191,37 @@ impl Style:
 Usage: `column(style=Style::empty().gap(8.0).padding(12.0).bg(theme.surface)):`.
 The constructor is a static method because a parameter named `style`
 hides a function named `style` in its own default (probed:
-`binding-not-yet-visible`).
+`binding-not-yet-visible`). Shorthands set several fields at once:
+`padding(px)`, `padding_x`, `padding_y`, `margin(px)`,
+`border(px, color)`; `merge(other)` overlays one style on another;
+`lower(style)` and `diff(last, next)` are the two lowering functions and
+are exported for renderers and tests.
 
 Builders:
 
-- `box(style: Style = Style::empty(), children)`; `column` and `row` are
-  `box` with `direction` preset and replace today's `gap` parameter, so
-  there is one way to write a gap.
+- `view(style: Style = Style::empty(), children)` makes a `"box"` node.
+  It is not named `box` because `box(...)` is hd's allocation builtin and
+  a public builder of that name would shadow it in every importing
+  module. `column` and `row` are `view` with `direction` preset and
+  replace the former `gap` parameter, so there is one way to write a gap.
 - `text(content, style=)`, `button(label, on_click, style=)`,
-  `input(value, style=)`.
+  `input(value, style=)`, `checkbox(checked, style=)`.
 - **Lowering at create**: for each `Some` field, one `SetProp` after
   `Create`. `Edges` lowers to its four keys. `Direction.Row` lowers to
   `Text("row")`.
 - **`style_live:`** inside a container's children block restyles the
-  enclosing container, which is the scope's `parent` node. The block
+  enclosing container, `$.use(Parent).parent()`. The block
   returns a `Style` under `Track`; the computation keeps the last `Style`
   and emits `SetProp` only for fields that changed, `Unset` for a field
   that went to `None` (the `diff` of the probe). Equal styles emit
   nothing, as `text_live` does for text. A live style on a leaf wraps the
   leaf in a `box`; a `text_live`-style variant for leaves can follow if
   examples want it.
-- `dom:class` is reachable through `Style.dom_class: string?` so the
-  non-portable key is spelled out where it is used.
+- `dom:class` is reachable through `Style.dom_class` so the non-portable
+  key is spelled out where it is used. `attr(name, value)` and
+  `attr_live(name, compute)` set `dom:attr:NAME` on the last node built,
+  for the few DOM attributes (`title`, `aria-*`) the vocabulary does not
+  cover.
 
 ## 5. Theme replaces the cascade
 
@@ -212,6 +232,11 @@ builders row-polymorphic:
 ```hd
 pub trait Theme:
     fn palette(self) -> ReadSignal[Palette]
+
+# provide_theme[$R](palette: Signal[Palette], body: fn() -> void $ R + Theme) -> void $ R
+# installs a SignalTheme; Palette::light() and Palette::dark() are the two
+# built-in palettes, with background, surface, on_surface, muted, line,
+# accent and on_accent.
 
 fn card() -> void $ Ui + Theme:
     theme := $.use(Theme).palette()
@@ -245,7 +270,7 @@ changes, drawing is the renderer's cadence. Unknown kinds render as
 - Flexbox subset only, box is flex column by default, no inheritance
   promised.
 - Static `style=` plus `style_live:` on the container; no per-property
-  live setters.
+  live setters. `attr_live` stays for `dom:attr:*` only.
 - `Theme` as a requirement key with a `ReadSignal[Palette]`, not a
   stylesheet.
 - No `Raw`; renderer-prefixed keys instead.
@@ -351,3 +376,17 @@ tests:
             pass
         assert_equal(h, 4.0, reason="named style")
 ```
+
+## 9. Deviations in the implementation (commit `a3f6f05`)
+
+Recorded with their reasons in `design.md`, phase 12:
+
+- The box builder is `view`, not `box` (section 4). The node kind is
+  still `"box"`.
+- Two kinds the design did not list: `"fragment"` (the `show` and
+  `for_each` wrappers, `display: contents` in the DOM) and `"checkbox"`
+  with a `checked` flag (section 3).
+- Enum payload fields are named (`Number(value: f32)`), because enum
+  fields cross the ABI by name (section 2).
+- `SetText` applies to `"button"` nodes as well as `"text"`.
+- `attr` / `attr_live` survive as the `dom:attr:NAME` escape hatch.

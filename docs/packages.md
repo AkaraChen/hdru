@@ -1,10 +1,12 @@
 # Package layout
 
-Status: design, 2026-11-02. Splits the one `ui` package into a workspace
-of layered packages along the three layers of `rendering.md`, using hd's
-module system (`spec/lang/10-modules.md`: workspaces, path requirements,
+Status: design, 2026-11-02; implemented the same day as roadmap phase 11
+(commit `81b6755`), with the deviations in section 7 and their reasons in
+`design.md`. Splits the one `ui` package into a workspace of layered
+packages along the three layers of `rendering.md`, using hd's module
+system (`spec/lang/10-modules.md`: workspaces, path requirements,
 `pub use` facades, package host traits). Probed at `cf5040b4a`; section 6
-lists what was checked. `roadmap.md` phase 11 does the move.
+lists what was checked.
 
 ## 1. Why split
 
@@ -48,9 +50,9 @@ hdru/
 
 | Package | Dependency key | Holds | Host trait | Engines |
 | --- | --- | --- | --- | --- |
-| `reactive` | `dep.reactive` | `Track`, `Mutate`, `Reactive` alias, graph, `signal`/`memo`/`effect`/`sync`/`batch`/`untrack`, owners, `on_cleanup`, `Provided`/`given` | none | node, wasmtime |
-| `ui` | `dep.ui` | `Ui` key and `Scope`; the protocol types `Command`, `PropValue`, `Color`, `Size`, `UiEvent`; `Style`; builders, `show`, `for_each`, inputs, `resource`; `mount`, `dispatch`, `take_commands`, the handler and job tables; `Theme`. Re-exports `reactive` | none | node, wasmtime |
-| `ui-dom` | `dep.ui_dom` | `@host trait Surface`, `run_app!` with the event loop and worker pool, `Recorder` and `scripted`, `providers/dom.mjs` | `surface.Surface` → `providers/dom.mjs` | node only |
+| `reactive` | `dep.reactive` | the `Owner`, `Track`, `Mutate` keys and the `Reactive` alias, graph, `signal`/`memo`/`effect`/`sync`/`batch`/`untrack`, owners (`root`, `owned`, `on_cleanup`), `Provided`/`given` and the owner-tree `provide`/`use_context` | none | node, wasmtime |
+| `ui` | `dep.ui` | the `Parent` key, `Scope`, and the row alias `type Ui = $ Owner + Parent`; the protocol types `Command`, `PropValue`, `Color`, `Size`, `UiEvent` (`protocol.hd`); `Style` (`style.hd`); `Theme` (`theme.hd`); builders, `show`, `for_each`, inputs, `resource`; `mount`, `dispatch`, `take_commands`, `run_job!`, the handler and job tables. Re-exports `reactive`'s user-facing names | none | node, wasmtime |
+| `ui-dom` | `dep.ui_dom` | `surface.hd` (`@host trait Surface`), `app.hd` (`run_app!` with the event loop and worker pool), `recorder.hd` (`Recorder`, `scripted`), `providers/dom.mjs` and its Node test | `surface.Surface` → `providers/dom.mjs` | node only |
 | `examples/*` | | one app each; `[dependencies] ui, ui_dom`; `[capabilities] "dep.ui_dom.surface.Surface" = true` | | node, browser |
 
 Later siblings, each a package with its own host trait and loop:
@@ -64,14 +66,29 @@ From today's `src/`:
 
 | File | Goes to | Note |
 | --- | --- | --- |
-| `keys.hd` | `reactive` (`Track`, `Mutate`, `Reactive`, `Collector`, `NoTrack`, `Scheduler`, ids) and `ui` (`Ui`, `Scope`, `NodeId`, `HandlerId`) | the one file that splits |
+| `keys.hd` | `reactive` (`Owner`, `Track`, `Mutate`, `Reactive`, `Collector`, `NoTrack`, `Scheduler`, ids) and `ui` (`Parent`, `Scope`, `NodeId`, `HandlerId`, `type Ui = $ Owner + Parent`) | the one file that splits; see "The `Ui` alias" below |
 | `graph.hd`, `reactive.hd`, `owner.hd`, `context.hd` | `reactive` | `context.hd`'s `Provided`/`given` are pure requirement-key code; the owner-tree `provide`/`use_context` go with them |
 | `surface.hd` | `ui` keeps `Command`, `PropValue`, `Color`, `Size`, `UiEvent`; `ui-dom` gets the `@host trait Surface` | the trait is four lines; the types are the protocol |
 | `builders.hd`, `collections.hd`, `inputs.hd`, `resource.hd` | `ui` | unchanged except imports |
 | `runtime.hd` | `ui` keeps `emit`, `create_node`, handlers, jobs, `mount`, `dispatch`, `take_commands`, `run_job!`, `reset_for_test`; `ui-dom` gets `send!`, `event_loop!`, `worker!`, `run_app!` | the suspending glue is the renderer's; everything synchronous stays in the core |
 | `recorder.hd` | `ui-dom` | it implements `ui-dom`'s `Surface` |
 | `providers/dom.mjs`, `providers/dom.test.mjs` | `ui-dom/providers/` | `cli.host.package.provider-containment`: the provider file must live inside its declaring package |
-| `tests/*.hd` | by subject: `core`, `context`, `rows` → `reactive`; `builders`, `show`, `for_each`, `attrs`, `inputs`, `resource` → `ui`; `loop` → `ui-dom` | `resource.hd` drives jobs with `run_job!` and `take_commands` instead of `run_jobs!` under `Surface` |
+| `tests/*.hd` | by subject: `core`, `rows` → `reactive`; `context`, `builders`, `show`, `for_each`, `style`, `inputs`, `resource`, `policy`, `mutate` → `ui`; `loop` → `ui-dom` | `context.hd` mounts builders, so it is `ui`'s; `resource.hd` drives jobs with `run_job!` and `take_commands` instead of `run_jobs!` under `Surface`; the two `run_app!` cases live in `ui-dom/tests/loop.hd` |
+
+### The `Ui` alias
+
+`memo`, `effect`, `on_cleanup`, `provide` and `resource` need the current
+owner, and the builders need the current parent node. The owner is a
+`reactive` concept and the node a `ui` one, so the one `Ui` trait became
+two keys and a row alias: `reactive` declares `trait Owner` (`fn owner`),
+`ui` declares `trait Parent` (`fn parent`) and `type Ui = $ Owner + Parent`
+(`req.row.alias`). Every `$ Ui` row in user code is unchanged. Inside the
+library, `$.use(Ui)` is gone, since an alias is not a key
+(`req.row.alias.type-or-key`): the reactive primitives write
+`$.use(Owner).owner()`, the builders `$.use(Parent).parent()`. Containers
+re-install only `Parent`; `owned` and `root` only `Owner`, through the
+provider `OwnedBy`. The graph's record struct was renamed `OwnerRecord`
+so the trait can be `Owner`.
 
 ### The interface the split forces out of `reactive`
 
@@ -83,15 +100,19 @@ uses, as Solid exposes `createComputed` and `createRenderEffect`. First
 cut:
 
 ```hd
-# reactive/src/lib.hd, the low-level section
-pub use pkg.graph.{Computation, Kind, ComputationId, OwnerId, SourceId}
-pub use pkg.graph.{new_owner, dispose, new_computation, run_computation, flush}
-pub use pkg.owner.{cleanup_on}   # cleanup_on(owner, action), the form builders need
+# reactive/src/lib.hd, the low-level section (as built)
+pub use pkg.graph.{
+    Computation, Kind, State,
+    cleanup_on, dispose, flush,
+    new_computation, new_owner,
+    reset_graph_for_test,
+    run_computation, run_effect,
+}
 ```
 
 Nothing else from `graph.hd` is exported; in particular `graph()` is not.
-Every present use of `graph().owners[owner].cleanups.push(...)` in the
-builders becomes `cleanup_on(owner, ...)`.
+Every former `graph().owners[owner].cleanups.push(...)` in the builders is
+`cleanup_on(owner, ...)`.
 
 ### `ui`'s facade
 
@@ -149,7 +170,12 @@ ui-dom = { path = "../../ui-dom", version = "0.1.0" }
 - Path requirements carry a `version` so a tagged release needs no
   manifest edit (`module.version.no-bare-path-release`,
   `module.workspace.path-version`). Locally the path wins; in a fetched
-  copy the version does.
+  copy the version does. `[package]` itself takes no `version` key (the
+  tag is the only version, `module.version.tag-only`), so only the
+  requirements name one.
+- `ui` and `ui-dom` carry `[dev-capabilities] Clock = true`: `ui` for
+  `tests/policy.hd`, whose timeout must really wait, and `ui-dom` for its
+  loop tests.
 - Tags are per package directory: `reactive/v0.1.0`, `ui/v0.1.0`,
   `ui-dom/v0.1.0` (`module.version.tag-prefix`). The three move together
   at first; they can diverge once `reactive` is stable.
@@ -185,6 +211,8 @@ ui-dom = { path = "../../ui-dom", version = "0.1.0" }
 
 ## 6. Probed (2026-11-02, `cf5040b4a`)
 
+See also section 7 for what the implementation changed.
+
 A four-member workspace (`reactive`, `ui`, `dom`, `app`) in the scratch
 directory:
 
@@ -207,3 +235,17 @@ directory:
   avoid it). After the split only `ui-dom` has a `[host]` table, so only
   its tests can hit it. Worth an upstream issue once reproduced in
   isolation.
+
+## 7. Deviations in the implementation (commit `81b6755`)
+
+Recorded with their reasons in `design.md`, phase 11:
+
+- `Ui` is a row alias over two keys, `Owner` in `reactive` and `Parent`
+  in `ui` (section 2, "The `Ui` alias"). The design had one trait in `ui`.
+- `tests/context.hd` lives in `ui`, not `reactive`: its cases mount
+  builders.
+- The `run_app!` cases are `ui-dom/tests/loop.hd`.
+- `[package]` rejects a `version` key; only path requirements carry one.
+- `reactive`'s low-level export list is the one in section 2, with
+  `State`, `run_effect` and `reset_graph_for_test` added for `ui`'s
+  runtime and tests.

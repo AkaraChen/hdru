@@ -129,7 +129,7 @@ compile-fail doc test (`# error: missing-requirement`) for a component
 whose row names `Theme` under a `mount` that provides none. The probe
 that proved rule 4 is the first test; its text is in section 6.
 
-### Phase 11: the package split (1 day)
+### Phase 11: the package split (1 day; done 2026-11-02, `81b6755`)
 
 Implements `packages.md`: one workspace, three library packages along
 the layers of `rendering.md`, examples as members.
@@ -154,7 +154,7 @@ each example runs under Node with the same command stream; the browser
 pages rebuild. `hd test -p reactive` and `-p ui` pass with no `[host]`
 table in either package.
 
-### Phase 12: the renderer protocol and typed style (2 days)
+### Phase 12: the renderer protocol and typed style (2 days; done 2026-11-02, `a3f6f05`)
 
 Implements `rendering.md`: a vocabulary-free protocol (layer 2) and a
 typed flexbox vocabulary in hd (layer 3), so the DOM provider becomes
