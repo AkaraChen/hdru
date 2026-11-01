@@ -2,18 +2,43 @@
 ## table, and the id counters. `mount` builds a tree; `dispatch` routes
 ## one event to its handler and flushes.
 use std.function.FnMut
+use std.task.all
 use pkg.keys.{HandlerId, Mutate, NodeId, NoTrack, OwnerId, Scheduler, Scope, Track, Ui}
 use pkg.graph.{flush, graph, new_owner}
 use pkg.reactive.batch
 use pkg.surface.{DomCommand, Surface, UiEvent}
+
+## A resource load waiting for a worker: a cold suspension that drives
+## the loader and lands its result.
+pub struct Job:
+    pub task: mut Suspend[void]
 
 pub struct Runtime:
     pub out: List[DomCommand]
     pub handlers: Map[HandlerId, fn(string) -> void $ Mutate]
     pub next_node: usize
     pub next_handler: usize
+    ## Jobs by id, until a worker takes one.
+    pub jobs: Map[usize, Job]
+    ## Ids registered since the loop last told the host about them.
+    pub unposted: List[usize]
+    pub next_job: usize
 
-RUNTIME := box(Runtime { out: [], handlers: {}, next_node: 1, next_handler: 1 })
+RUNTIME := box(
+    Runtime {
+        out: [],
+        handlers: {},
+        next_node: 1,
+        next_handler: 1,
+        jobs: {},
+        unposted: [],
+        next_job: 1,
+    },
+)
+
+# How many worker tasks `run_app!` runs beside the event loop, so at most
+# this many loads are in flight at once.
+WORKERS := 4
 
 pub fn runtime() -> *mut Runtime:
     RUNTIME
@@ -42,6 +67,22 @@ pub fn register_handler[F < 'static & FnMut(string) -> void $ Mutate](mut handle
 pub fn drop_handler(id: HandlerId) -> void:
     _ := runtime().handlers.remove(id)
 
+## Registers a job and returns its id. The loop or a worker posts it to
+## the host at its next turn.
+pub fn register_job(task: mut Suspend[void]) -> usize:
+    rt := runtime()
+    id := rt.next_job
+    rt.next_job += 1
+    rt.jobs[id] = Job { task: task }
+    rt.unposted.push(id)
+    id
+
+## Forgets a job a worker has not taken yet; a cold suspension needs no
+## cleanup. A job already running completes and its result is dropped by
+## the resource's generation check.
+pub fn drop_job(id: usize) -> void:
+    _ := runtime().jobs.remove(id)
+
 ## Drains and returns the queued commands.
 pub fn take_commands() -> List[DomCommand]:
     rt := runtime()
@@ -50,8 +91,10 @@ pub fn take_commands() -> List[DomCommand]:
     commands
 
 ## Builds `root` under a fresh owner, appending to node 0, and flushes.
-## Returns the owner so the tree can be disposed.
-pub fn mount(root: fn() -> void $ Ui) -> OwnerId:
+## Returns the owner so the tree can be disposed. A root that needs other
+## providers, say `$ Ui + Clock` to capture a clock for a loader, names
+## them in its row and `mount` requires them too.
+pub fn mount[$ R](root: fn() -> void $ Ui + R) -> OwnerId $ R:
     owner := new_owner(.None)
     $.with(Ui=box(Scope { owner: owner, parent: 0 }), Track=box(NoTrack {})):
         root()
@@ -69,7 +112,7 @@ pub fn dispatch(event: UiEvent) -> void:
         .None => pass
     flush()
 
-## Resets ids and clears the queue and the handler table. For tests that
+## Resets ids and clears the queues and the handler table. For tests that
 ## assert exact command lists.
 pub fn reset_for_test() -> void:
     rt := runtime()
@@ -77,19 +120,78 @@ pub fn reset_for_test() -> void:
     rt.handlers = {}
     rt.next_node = 1
     rt.next_handler = 1
+    rt.jobs = {}
+    rt.unposted = []
+    rt.next_job = 1
     g := graph()
     g.effects = []
     g.flushing = false
     g.batch_depth = 0
 
-## Mounts `root`, sends its commands, then loops: wait for an event,
-## dispatch it, send what changed. Returns when the host sends handler 0.
-pub fn run_app!(root: fn() -> void $ Ui) -> void $ Surface:
-    _ := mount(root)
-    $.use(Surface).apply!(take_commands())
+fn send!() -> void $ Surface:
+    commands := take_commands()
+    if !commands.is_empty():
+        $.use(Surface).apply!(commands)
+    rt := runtime()
+    ids := rt.unposted
+    rt.unposted = []
+    for id in ids:
+        $.use(Surface).post_job(id)
+
+## Runs one registered job on the current task: drives the loader and
+## lands its result. A job a `drop_job` removed is skipped.
+pub fn run_job!(id: usize) -> void:
+    rt := runtime()
+    found := rt.jobs.remove(id)
+    match found:
+        .Some(job) =>
+            let mut task = job.task
+            task!()
+        .None => pass
+
+## Runs every job registered so far on the current task, in order, and
+## sends what they emitted. For tests under `Recorder`, whose `next_job!`
+## never waits.
+pub fn run_jobs!() -> void $ Surface:
+    while true:
+        rt := runtime()
+        ids := rt.unposted
+        rt.unposted = []
+        if ids.is_empty():
+            break
+        for id in ids:
+            run_job!(id)
+    send!()
+
+fn event_loop!() -> void $ Surface:
     while true:
         event := $.use(Surface).next_event!()
         if event.handler == 0:
             break
         dispatch(event)
-        $.use(Surface).apply!(take_commands())
+        send!()
+    let count = 0
+    while count < WORKERS:
+        $.use(Surface).post_job(0)
+        count += 1
+
+fn worker!() -> void $ Surface:
+    while true:
+        id := $.use(Surface).next_job!()
+        if id == 0:
+            break
+        run_job!(id)
+        send!()
+
+fn workers!() -> void $ Surface:
+    _ := all!(worker(), worker(), worker(), worker())
+
+## Mounts `root`, sends its commands, then runs the event loop beside a
+## pool of workers until the host sends handler 0: each event is
+## dispatched and its changes sent; each resource load runs on a worker
+## and lands its result when the loader completes. Returns when the loop
+## has ended and every worker has stopped.
+pub fn run_app![$ R](root: fn() -> void $ Ui + R) -> void $ Surface + R:
+    _ := mount(root)
+    send!()
+    _ := all!(event_loop(), workers())

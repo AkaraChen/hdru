@@ -1,0 +1,86 @@
+## Resources: a value loaded by a suspending function whenever a tracked
+## key changes. The loader runs on one of `run_app!`'s workers, so the
+## event loop keeps serving clicks while it waits.
+use std.function.Fn
+use pkg.keys.{Mutate, Track, Ui}
+use pkg.graph.{Computation, graph, new_computation, run_computation}
+use pkg.reactive.{ReadSignal, Signal, signal}
+use pkg.runtime.{drop_job, register_job}
+
+## What a resource holds: nothing yet, the loaded value, or the loader's
+## error.
+@derive(Eq, Debug)
+pub enum Resource[T, E]:
+    Loading
+    Ready(value: T)
+    Failed(error: E)
+
+struct Generation:
+    current: usize
+    queued: usize?
+
+fn land![T < 'static, E < 'static](
+    mine: usize,
+    generation: *mut Generation,
+    pending: mut Suspend[Result[T, E]],
+    state: Signal[Resource[T, E]],
+) -> void $ Mutate:
+    result := pending!()
+    if generation.current != mine:
+        return
+    generation.queued = .None
+    match result:
+        .Ok(value) => state.set(.Ready(value))
+        .Err(error) => state.set(.Failed(error))
+
+## A value that follows `key`: whenever a signal `key` reads changes, the
+## resource goes back to `Loading` and `load(key())` runs on a worker; its
+## result lands as `Ready` or `Failed`. A result that arrives after the
+## key moved on, or after the owner was disposed, is dropped.
+##
+## `load` has the empty row: a loader that needs a provider captures it
+## before the call, as `http := $.use(Http)` then
+## `fn!(id: i32) -> Result[User, HttpError]: http.get!(...)`.
+pub fn resource[
+    K < 'static,
+    T < 'static,
+    E < 'static,
+    KF < 'static & Fn() -> K $ Track,
+    L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
+](key: KF, load: L) -> ReadSignal[Resource[T, E]] $ Ui:
+    owner := $.use(Ui).owner()
+    state := signal::[Resource[T, E]](.Loading)
+    generation := box(Generation { current: 0, queued: .None })
+    run := fn() -> bool $ Track + Mutate:
+        k := key()
+        generation.current += 1
+        mine := generation.current
+        match generation.queued:
+            .Some(stale) => drop_job(stale)
+            .None => pass
+        state.set(.Loading)
+        id := register_job(land(mine, generation, load(k), state))
+        generation.queued = .Some(id)
+        false
+    computation := new_computation(
+        Computation {
+            run: run,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(computation)
+    graph().owners[owner]
+        .cleanups
+        .push(
+            fn() -> void:
+                generation.current += 1
+                match generation.queued:
+                    .Some(stale) => drop_job(stale)
+                    .None => pass
+            ,
+        )
+    state.read()

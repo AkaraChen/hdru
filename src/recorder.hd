@@ -1,11 +1,15 @@
 ## An hd `Surface` for tests and scripted runs: `apply!` logs every
-## command and `next_event!` pops a scripted event, or handler 0 (stop)
-## when the script is empty.
+## command, `next_event!` pops a scripted event, or handler 0 (stop) when
+## the script is empty, and jobs queue in a list.
 use pkg.surface.{DomCommand, Surface, UiEvent}
 
 pub struct Recorder:
     pub log: List[DomCommand]
     pub events: List[UiEvent]
+    ## Job ids posted and not yet taken. `next_job!` answers 0 when empty,
+    ## so under the recorder a worker stops instead of waiting; tests run
+    ## posted jobs with `run_jobs!` instead.
+    pub jobs: List[usize]
 
 impl Surface for Recorder:
     fn apply!(&mut self, commands: List[DomCommand]) -> void:
@@ -18,9 +22,15 @@ impl Surface for Recorder:
         else:
             self.events.remove_at(0)
 
+    fn post_job(&mut self, job: usize) -> void:
+        self.jobs.push(job)
+
+    fn next_job!(&mut self) -> usize:
+        if self.jobs.is_empty(): 0 else: self.jobs.remove_at(0)
+
 ## A recorder that will answer `clicks` in order, then stop.
 pub fn scripted(clicks: List[usize]) -> *mut Recorder:
     let mut events: List[UiEvent] = []
     for handler in clicks:
         events.push(UiEvent { handler: handler, payload: "" })
-    box(Recorder { log: [], events: events })
+    box(Recorder { log: [], events: events, jobs: [] })

@@ -6,7 +6,9 @@
 // ("2,2,1"), then handler 0 to stop.
 //
 // Commands arrive as { tag, fields }; an optional field is a value or
-// null; node and handler ids are Numbers.
+// null; node, handler and job ids are Numbers. `next_job` returns a
+// Promise that a later `post_job` resolves, which is what lets the
+// runtime's worker tasks wait for resource loads.
 
 function createDomSurface(root) {
   const nodes = new Map([[0, root]]);
@@ -69,8 +71,20 @@ function createDomSurface(root) {
         throw new Error(`ui: unknown command ${command.tag}`);
     }
   };
+  const jobs = [];
+  const jobWaiters = [];
   let batch = 0;
   return {
+    post_job(job) {
+      if (jobWaiters.length) jobWaiters.shift()(job);
+      else jobs.push(job);
+    },
+    next_job() {
+      if (jobs.length) return jobs.shift();
+      return new Promise((resolve) => {
+        jobWaiters.push(resolve);
+      });
+    },
     apply(commands) {
       batch += 1;
       console.log(`ui: batch ${batch}: ${commands.length} command(s)`);
@@ -152,8 +166,21 @@ function createScriptedSurface(clicks, print) {
     for (const child of n.children) lines.push(...render(child, depth + 1));
     return lines;
   };
+  const jobs = [];
+  const jobWaiters = [];
   let batch = 0;
   return {
+    post_job(job) {
+      if (job !== 0) print(`-- job ${job} posted`);
+      if (jobWaiters.length) jobWaiters.shift()(job);
+      else jobs.push(job);
+    },
+    next_job() {
+      if (jobs.length) return jobs.shift();
+      return new Promise((resolve) => {
+        jobWaiters.push(resolve);
+      });
+    },
     apply(commands) {
       batch += 1;
       print(`-- batch ${batch}: ${commands.length} command(s)`);

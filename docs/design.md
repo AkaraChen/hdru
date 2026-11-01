@@ -235,3 +235,43 @@ reruns the `show` computation (writes do not compare) but emits nothing.
   holds a trailing `text_live:` block inside a call's brackets, into a
   form the parser rejects (`trailing-block-position`). The test now
   writes that block as an explicit closure. Logged in the hd writing log.
+
+## Phase 8: resources (2026-11-02)
+
+`src/resource.hd`, `tests/resource.hd`, job methods on `Surface`,
+workers in `run_app!`, `examples/fetcher`.
+
+- **Why not `race!`.** The plan wanted the loop to interleave
+  `next_event!` with loader completions. `race!` cancels its losers
+  (`req.combinator.race-losers-disposed`), `all!` has fixed arity, and
+  user code can neither construct a `PollContext` nor implement
+  `Suspend` (`req.protocol.builtin`, `req.poll-context.user`), so no
+  user-written combinator can poll a changing set of loaders. The only
+  thing that can suspend is a host wait.
+- **So loads go through a host-mediated queue.** `Surface` gained
+  `post_job(id)` and `next_job!() -> id`. `run_app!` is
+  `all!(event_loop(), workers())` with four workers; each worker loops on
+  `next_job!`, drives the job, and sends what it emitted. The event loop
+  posts four zeros when it ends, so every worker stops and `all!`
+  completes. A worker that is mid-load takes its zero afterwards, so a
+  load in flight at shutdown still lands. The JavaScript provider answers
+  `next_job` with a Promise; the hd `Recorder` answers 0 at once, so
+  tests drive posted jobs with `run_jobs!` on the test task instead.
+- **A loader has the empty row.** Its providers are bound when the cold
+  suspension is constructed, inside the resource's tracking computation,
+  which runs under `Track + Mutate` only; a row parameter cannot be
+  carried there (`$.Context` takes no row parameter). So the loader
+  captures what it needs lexically, `clock := $.use(Clock)` before
+  `fn!(key) ...`, as `req.with.lexical` describes. The bound is
+  `L < 'static & Fn(K) -> mut Suspend[Result[T, E]]`, which a `fn!`
+  closure satisfies by `fn.trait.suspend-weaken`.
+- **Landing.** Each job is a cold `land(...)` suspension that awaits the
+  loader and writes the resource's signal under the `Mutate` captured at
+  construction. A generation counter on the resource makes a result for
+  an old key, or for a disposed owner, a no-op. A queued job that has not
+  been taken is removed from the table, which costs nothing for a cold
+  suspension (`req.discard.cold`).
+- **What is not done.** An in-flight load is not cancelled: abandoning a
+  suspension another task awaits cancels that task
+  (`req.cancel.await`), which would kill the worker, so the result is
+  dropped at landing instead. The pool size is fixed at four.

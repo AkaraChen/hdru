@@ -1,0 +1,44 @@
+use dep.ui.{Resource, Surface, Ui, button, column, resource, row, run_app, signal, text_live}
+use std.time.{Clock, ms}
+
+## Pretends to fetch a profile: waits, then answers, or fails for id 13.
+fn fetch_profile!(clock: *mut dyn Clock, id: i32) -> Result[string, string]:
+    clock.sleep!(ms(400))
+    if id == 13: .Err("unlucky") else: .Ok("profile of user $id")
+
+fn describe(state: Resource[string, string]) -> string:
+    match state:
+        .Loading => "loading…"
+        .Ready(value) => value
+        .Failed(error) => "failed: $error"
+
+fn app() -> void $ Ui + Clock:
+    let clock: *mut dyn Clock = $.use(Clock)
+    id := signal(+1)
+    profile := resource(
+        fn(): id.get(),
+        fn!(key: i32) -> Result[string, string]: fetch_profile!(clock, key)
+        ,
+    )
+    column(gap=8):
+        text_live:
+            "user ${id.get()}"
+        text_live:
+            describe(profile.get())
+        row(gap=4):
+            button(
+                "previous",
+                fn():
+                    id.update(fn(n): n - 1)
+                ,
+            )
+            button(
+                "next",
+                fn():
+                    id.update(fn(n): n + 1)
+                ,
+            )
+            button("unlucky", fn(): id.set(+13))
+
+pub fn main!() -> void $ Surface + Clock:
+    run_app!(app)

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hd ui: fetcher</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; margin: 2rem; }
+    .column { display: flex; flex-direction: column; }
+    .row { display: flex; flex-direction: row; }
+    .show, .list, .item { display: contents; }
+    button { font: inherit; padding: 0.25rem 0.75rem; }
+    #status { color: #666; margin-top: 2rem; font-size: 0.9rem; }
+  </style>
+</head>
+<body data-app="fetcher">
+  <h1>hd ui: fetcher</h1>
+  <p><a href="./index.html">counter demo</a></p>
+  <div id="app"></div>
+  <p id="status">loading…</p>
+  <script type="module" src="./dist/main.js"></script>
+</body>
+</html>

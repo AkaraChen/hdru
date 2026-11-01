@@ -1,0 +1,9 @@
+[package]
+name = "fetcher"
+
+[dependencies]
+ui = { path = "../.." }
+
+[capabilities]
+"dep.ui.surface.Surface" = true
+Clock = true

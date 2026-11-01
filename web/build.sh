@@ -4,7 +4,7 @@
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$here/dist"
-for app in counter todos; do
+for app in counter todos fetcher; do
   (cd "$here/../examples/$app" && hd build)
   cp "$here/../examples/$app/build/debug/$app.wasm" "$here/dist/$app.wasm"
 done

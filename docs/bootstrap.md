@@ -1,8 +1,10 @@
 # Bootstrap plan: a Solid-style reactive UI library for hd
 
 Status: implementation plan, 2026-11-01; phases 0 to 7 were implemented
-the same day (see `design.md` for what each phase actually became and
-the `Outcome` column below). Phase 8 stays deferred. Derived from the review doc
+the same day and phase 8 on 2026-11-02 (see `design.md` for what each
+phase actually became and the `Outcome` column below). The wasmtime
+engine is out of scope for now: this `hd` build has none, and every gate
+runs on the Node engine. Derived from the review doc
 "A Solid-style reactive UI for hd: review and counter-proposal" (the
 "review" below) and checked against the `hd-lang` checkout at commit
 `cf5040b4a` (2026-11-01), which lives beside this repo at `../hd-lang`.
@@ -246,7 +248,7 @@ shown what the loop looks like with one suspending source.
 | 5 effects + context | 1 | effect ordering and cleanup tests green | done; `use_context` returns a copy, `owned` added |
 | 6 host trait + Node | 2 | `hd run --engine node` counter works | done; one provider file for both hosts |
 | 7 browser | 1 | both demos run in a browser | done; verified by clicking in a real browser |
-| 8 resources | later | design note approved first | deferred |
+| 8 resources | later | design note approved first | done 2026-11-02; loaders run on a worker pool under `all!`, cancellation drops stale results instead of cancelling in-flight loads (design.md) |
 
 Eleven and a half working days to a browser demo, with the library usable
 from phase 2 on. Phases 3, 4 and 5 are independent of each other and can run
