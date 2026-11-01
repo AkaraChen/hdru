@@ -1,0 +1,181 @@
+## Signals, memos and effects.
+use std.function.{Fn, FnMut}
+use pkg.keys.{Collector, ComputationId, Mutate, NoTrack, SourceId, Track, Ui}
+use pkg.graph.{
+    Computation,
+    ensure_fresh,
+    flush,
+    graph,
+    mark_write,
+    new_computation,
+    new_source,
+    run_computation,
+    subscribe,
+}
+
+pub struct Slot[T < 'static]:
+    pub value: T
+    pub id: SourceId
+
+## A readable handle: a signal's read half, or a memo.
+pub struct ReadSignal[T < 'static]:
+    slot: *mut Slot[T]
+    computation: ComputationId?
+
+## A writable signal handle. Copying the handle shares the value.
+pub struct Signal[T < 'static]:
+    slot: *mut Slot[T]
+
+## Creates a signal holding `initial`.
+##
+## ```hd
+## use pkg.{root, signal}
+## use std.testing.assert_equal
+## _ := root:
+##     count := signal(+1)
+##     count.set(+2)
+##     assert_equal(count.get(), +2, reason="the written value")
+## ```
+pub fn signal[T < 'static](initial: T) -> Signal[T]:
+    Signal { slot: box(Slot { value: initial, id: new_source() }) }
+
+impl[T < 'static] Signal[T]:
+    ## Reads the value and records the dependency.
+    pub fn get(self) -> T $ Track:
+        $.use(Track).depend(self.slot.id)
+        self.slot.value
+
+    ## Reads the value without recording a dependency.
+    pub fn peek(self) -> T:
+        self.slot.value
+
+    ## Writes the value, marks every observer, and flushes effects unless a
+    ## batch is open.
+    pub fn set(self, value: T) -> void $ Mutate:
+        self.slot.value = value
+        mark_write(self.slot.id)
+        $.use(Mutate).invalidate(self.slot.id)
+        if graph().batch_depth == 0:
+            flush()
+
+    ## Writes `change(current)`.
+    pub fn update(self, change: fn(T) -> T) -> void $ Mutate:
+        self.set(change(self.slot.value))
+
+    ## The read-only half of this signal.
+    pub fn read(self) -> ReadSignal[T]:
+        ReadSignal { slot: self.slot, computation: .None }
+
+    pub fn id(self) -> SourceId:
+        self.slot.id
+
+impl[T < 'static] ReadSignal[T]:
+    ## Reads the value and records the dependency. A memo is brought up to
+    ## date first.
+    pub fn get(self) -> T $ Track:
+        $.use(Track).depend(self.slot.id)
+        self.refresh()
+        self.slot.value
+
+    ## Reads the value without recording a dependency.
+    pub fn peek(self) -> T:
+        self.refresh()
+        self.slot.value
+
+    fn refresh(self) -> void:
+        match self.computation:
+            .Some(id) => ensure_fresh(id)
+            .None => pass
+
+    pub fn id(self) -> SourceId:
+        self.slot.id
+
+## A derived value. The block may only read, so a write inside it is a
+## compile error:
+##
+## ```hd
+## use pkg.{memo, root, signal}
+## _ := root:
+##     count := signal(+1)
+##     doubled := memo:
+##         count.set(+0)  # error: unsatisfied-trait-bound
+##         count.get() * 2
+## ```
+pub fn memo[T < 'static & Eq, F < 'static & Fn() -> T $ Track](compute: F) -> ReadSignal[T] $ Ui:
+    owner := $.use(Ui).owner()
+    source := new_source()
+    collector := box(Collector { deps: [] })
+    first := $.with(Track=collector):
+        compute()
+    slot := box(Slot { value: first, id: source })
+    run := fn() -> bool $ Track + Mutate:
+        next := compute()
+        if next == slot.value:
+            false
+        else:
+            slot.value = next
+            true
+    computation := new_computation(
+        Computation {
+            run: run,
+            kind: .Memo,
+            state: .Clean,
+            deps: [],
+            owner: owner,
+            source: .Some(source),
+        },
+    )
+    subscribe(computation, collector.deps)
+    ReadSignal { slot: slot, computation: .Some(computation) }
+
+## A tracked side effect. It runs once now and again after any signal it
+## read changes. The block only reads; use `sync` for one that also writes.
+pub fn effect[F < 'static & FnMut() -> void $ Track](mut run: F) -> void $ Ui:
+    owner := $.use(Ui).owner()
+    erased := fn() -> bool $ Track + Mutate:
+        run()
+        false
+    computation := new_computation(
+        Computation {
+            run: erased,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(computation)
+
+## A tracked block that may also write signals, to keep one in step with
+## others. Writes inside it are batched until the current flush ends.
+pub fn sync[F < 'static & FnMut() -> void $ Track + Mutate](mut run: F) -> void $ Ui:
+    owner := $.use(Ui).owner()
+    erased := fn() -> bool $ Track + Mutate:
+        run()
+        false
+    computation := new_computation(
+        Computation {
+            run: erased,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(computation)
+
+## Runs `body` with writes deferred: effects flush once, at the end.
+pub fn batch(body: fn() -> void $ Mutate) -> void $ Mutate:
+    g := graph()
+    g.batch_depth += 1
+    body()
+    g.batch_depth -= 1
+    if g.batch_depth == 0:
+        flush()
+
+## Runs `body` without recording any dependency it reads.
+pub fn untrack[T](body: fn() -> T $ Track) -> T:
+    $.with(Track=box(NoTrack {})):
+        body()

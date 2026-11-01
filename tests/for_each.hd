@@ -1,0 +1,104 @@
+use pkg.{
+    DomCommand,
+    Signal,
+    Ui,
+    UiEvent,
+    button,
+    column,
+    dispatch,
+    for_each,
+    mount,
+    reset_for_test,
+    signal,
+    take_commands,
+    text_live,
+}
+use std.testing.assert_equal
+
+@derive(Eq, Debug)
+struct Todo:
+    id: usize
+    title: string
+
+fn rename(xs: List[Todo]) -> List[Todo]:
+    [for todo in xs => if todo.id == 1: Todo { ...todo, title: "A" } else: todo]
+
+fn add(xs: List[Todo]) -> List[Todo]:
+    [xs..., Todo { id: 3, title: "c" }]
+
+fn drop_first(xs: List[Todo]) -> List[Todo]:
+    let mut ys = xs
+    _ := ys.remove_at(0)
+    ys
+
+fn prepend(xs: List[Todo]) -> List[Todo]:
+    [Todo { id: 4, title: "d" }, xs...]
+
+fn todos_view() -> void $ Ui:
+    todos := signal([Todo { id: 1, title: "a" }, Todo { id: 2, title: "b" }])
+    column:
+        button("rename", fn(): todos.update(rename))
+        button(
+            "reverse",
+            fn():
+                todos.update(fn(xs): xs.reversed())
+            ,
+        )
+        button("add", fn(): todos.update(add))
+        button("drop first", fn(): todos.update(drop_first))
+        button("prepend", fn(): todos.update(prepend))
+        for_each(
+            todos.read(),
+            fn(todo): todo.id,
+            fn(todo):
+                text_live(fn(): todo.get().title)
+            ,
+        )
+
+fn click(handler: usize) -> List[DomCommand]:
+    dispatch(UiEvent { handler: handler, payload: "" })
+    take_commands()
+
+it("for_each mounts one row per item under a list node"):
+    reset_for_test()
+    _ := mount(todos_view)
+    commands := take_commands()
+    assert_equal(commands.contains(.SetAttr(7, "class", "list")), true, reason="the list node")
+    assert_equal(commands.contains(.Append(7, 8)), true, reason="row 1 under the list")
+    assert_equal(commands.contains(.SetText(9, "a")), true, reason="row 1 text")
+    assert_equal(commands.contains(.Append(7, 10)), true, reason="row 2 under the list")
+    assert_equal(commands.contains(.SetText(11, "b")), true, reason="row 2 text")
+
+it("rows keep identity across updates and emit only what changed"):
+    reset_for_test()
+    _ := mount(todos_view)
+    _ := take_commands()
+    assert_equal(click(1), [.SetText(9, "A")], reason="same id, new title: one SetText")
+    assert_equal(click(2), [.MoveBefore(7, 10, .Some(8))], reason="reverse: one move")
+    assert_equal(
+        click(3),
+        [
+            .Create(12, "div"),
+            .SetAttr(12, "class", "item"),
+            .Append(7, 12),
+            .Create(13, "text"),
+            .Append(12, 13),
+            .SetText(13, "c"),
+        ],
+        reason="append: one new row, no move",
+    )
+    assert_equal(click(4), [.Remove(10)], reason="drop first: one Remove")
+    assert_equal(
+        click(5),
+        [
+            .Create(14, "div"),
+            .SetAttr(14, "class", "item"),
+            .Append(7, 14),
+            .Create(15, "text"),
+            .Append(14, 15),
+            .SetText(15, "d"),
+            .MoveBefore(7, 14, .Some(8)),
+        ],
+        reason="prepend: one new row, then one move to the front",
+    )
+    assert_equal(click(1), [], reason="rename again: title already A")

@@ -1,0 +1,170 @@
+use pkg.{Track, batch, dispose, effect, memo, on_cleanup, root, signal, sync, untrack}
+use std.testing.assert_equal
+
+struct Counter:
+    runs: usize
+
+it("a signal round-trips a write"):
+    _ := root:
+        count := signal(+1)
+        assert_equal(count.get(), +1, reason="initial")
+        count.set(+2)
+        assert_equal(count.get(), +2, reason="after set")
+        count.update(fn(n): n + 10)
+        assert_equal(count.peek(), +12, reason="after update")
+
+it("a memo recomputes once per change and not on read"):
+    _ := root:
+        count := signal(+1)
+        runs := box(Counter { runs: 0 })
+        doubled := memo:
+            runs.runs += 1
+            count.get() * 2
+        assert_equal(doubled.get(), +2, reason="initial value")
+        assert_equal(doubled.get(), +2, reason="second read")
+        assert_equal(runs.runs, 1, reason="one run for creation")
+        count.set(+5)
+        assert_equal(doubled.get(), +10, reason="after set")
+        assert_equal(doubled.get(), +10, reason="read again")
+        assert_equal(runs.runs, 2, reason="one run per change")
+
+it("a diamond recomputes its join once"):
+    _ := root:
+        a := signal(+1)
+        b := memo:
+            a.get() + 1
+        c := memo:
+            a.get() * 10
+        runs := box(Counter { runs: 0 })
+        d := memo:
+            runs.runs += 1
+            b.get() + c.get()
+        assert_equal(d.get(), +12, reason="initial")
+        a.set(+2)
+        assert_equal(d.get(), +23, reason="after set")
+        assert_equal(runs.runs, 2, reason="d ran once for the change")
+
+it("a conditional dependency is dropped when no longer read"):
+    _ := root:
+        flag := signal(true)
+        x := signal(+1)
+        y := signal(+2)
+        runs := box(Counter { runs: 0 })
+        pick := memo:
+            runs.runs += 1
+            if flag.get():
+                x.get()
+            else:
+                y.get()
+        assert_equal(pick.get(), +1, reason="x branch")
+        flag.set(false)
+        assert_equal(pick.get(), +2, reason="y branch")
+        assert_equal(runs.runs, 2, reason="recomputed on flag")
+        x.set(+50)
+        assert_equal(pick.get(), +2, reason="x is no longer read")
+        assert_equal(runs.runs, 2, reason="no recompute for x")
+        y.set(+7)
+        assert_equal(pick.get(), +7, reason="y is still read")
+        assert_equal(runs.runs, 3, reason="recomputed on y")
+
+it("an equal memo value stops propagation"):
+    _ := root:
+        n := signal(+2)
+        half := memo:
+            n.get() / 2
+        runs := box(Counter { runs: 0 })
+        shifted := memo:
+            runs.runs += 1
+            half.get() + 100
+        assert_equal(shifted.get(), +101, reason="initial")
+        n.set(+3)
+        assert_equal(half.get(), +1, reason="half unchanged")
+        assert_equal(shifted.get(), +101, reason="still 101")
+        assert_equal(runs.runs, 1, reason="shifted did not rerun")
+        n.set(+4)
+        assert_equal(shifted.get(), +102, reason="now changed")
+        assert_equal(runs.runs, 2, reason="shifted reran once")
+
+it("an effect runs at creation and after each change, once per flush"):
+    _ := root:
+        a := signal(+1)
+        b := signal(+10)
+        let mut log: List[i32] = []
+        effect:
+            log.push(a.get() + b.get())
+        assert_equal(log, [+11], reason="ran at creation")
+        a.set(+2)
+        assert_equal(log, [+11, +12], reason="ran after a")
+        batch:
+            a.set(+3)
+            b.set(+20)
+        assert_equal(log, [+11, +12, +23], reason="one run for the batch")
+
+it("an effect does not rerun when a memo it reads keeps its value"):
+    _ := root:
+        n := signal(+2)
+        half := memo:
+            n.get() / 2
+        let mut log: List[i32] = []
+        effect:
+            log.push(half.get())
+        n.set(+3)
+        assert_equal(log, [+1], reason="half still 1, no rerun")
+        n.set(+4)
+        assert_equal(log, [+1, +2], reason="half changed")
+
+it("untrack hides a read from the effect"):
+    _ := root:
+        a := signal(+1)
+        b := signal(+2)
+        let mut log: List[i32] = []
+        effect:
+            seen := untrack(fn(): b.get())
+            log.push(a.get() + seen)
+        b.set(+20)
+        assert_equal(log, [+3], reason="b is not a dependency")
+        a.set(+5)
+        assert_equal(log, [+3, +25], reason="a is, and reads the fresh b")
+
+it("a sync effect may write another signal"):
+    _ := root:
+        source := signal(+1)
+        mirror := signal(+0)
+        sync:
+            mirror.set(source.get() * 100)
+        assert_equal(mirror.get(), +100, reason="initial sync")
+        source.set(+2)
+        assert_equal(mirror.get(), +200, reason="after change")
+
+it("disposing an owner stops its computations and runs cleanups"):
+    let mut log: List[string] = []
+    count := signal(+1)
+    runs := box(Counter { runs: 0 })
+    owner := root:
+        doubled := memo:
+            runs.runs += 1
+            count.get() * 2
+        effect:
+            log.push("effect ${doubled.get()}")
+        on_cleanup:
+            log.push("cleanup")
+    assert_equal(log, ["effect 2"], reason="before dispose")
+    dispose(owner)
+    assert_equal(log, ["effect 2", "cleanup"], reason="cleanup ran")
+    _ := root:
+        count.set(+5)
+    assert_equal(runs.runs, 1, reason="the memo did not run after dispose")
+    assert_equal(log, ["effect 2", "cleanup"], reason="the effect did not run after dispose")
+
+it("an effect that reads nothing tracked is written with an explicit row"):
+    _ := root:
+        a := signal(+1)
+        let mut log: List[i32] = []
+        effect(
+            fn() -> void $ Track:
+                inner := untrack(fn(): a.get() + 1)
+                log.push(inner)
+            ,
+        )
+        a.set(+2)
+        assert_equal(log, [+2], reason="only the creation run, a was untracked")

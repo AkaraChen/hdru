@@ -1,0 +1,23 @@
+use dep.ui.{Surface, Ui, button, column, row, run_app, signal, text_live}
+
+fn counter() -> void $ Ui:
+    count := signal(+0)
+    column(gap=8):
+        text_live:
+            "Count: ${count.get()}"
+        row(gap=4):
+            button(
+                "-",
+                fn():
+                    count.update(fn(n): n - 1)
+                ,
+            )
+            button(
+                "+",
+                fn():
+                    count.update(fn(n): n + 1)
+                ,
+            )
+
+pub fn main!() -> void $ Surface:
+    run_app!(counter)

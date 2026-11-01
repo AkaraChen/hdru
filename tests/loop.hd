@@ -1,0 +1,50 @@
+use pkg.{
+    DomCommand,
+    Surface,
+    Ui,
+    button,
+    column,
+    reset_for_test,
+    row,
+    run_app,
+    scripted,
+    signal,
+    text_live,
+}
+use std.testing.assert_equal
+
+fn counter() -> void $ Ui:
+    count := signal(+0)
+    column:
+        text_live:
+            "Count: ${count.get()}"
+        row:
+            button(
+                "-",
+                fn():
+                    count.update(fn(n): n - 1)
+                ,
+            )
+            button(
+                "+",
+                fn():
+                    count.update(fn(n): n + 1)
+                ,
+            )
+
+it("run_app drives the counter through a scripted surface and stops on handler 0"):
+    reset_for_test()
+    recorder := scripted([2, 2, 1, 7])
+    $.with(Surface=recorder):
+        run_app!(counter)
+    log := recorder.log
+    assert_equal(log.len(), 20, reason="17 mount commands and 3 updates")
+    assert_equal(log.get(0), .Some(DomCommand.Create(1, "div")), reason="mount first")
+    assert_equal(log.get(17), .Some(DomCommand.SetText(2, "Count: 1")), reason="first plus")
+    assert_equal(log.get(18), .Some(DomCommand.SetText(2, "Count: 2")), reason="second plus")
+    assert_equal(
+        log.get(19),
+        .Some(DomCommand.SetText(2, "Count: 1")),
+        reason="minus; the unknown handler 7 emitted nothing",
+    )
+    assert_equal(recorder.events, [], reason="every scripted event was consumed")

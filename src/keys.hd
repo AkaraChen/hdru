@@ -1,0 +1,67 @@
+## Identifiers and the three requirement keys of the reactive runtime.
+##
+## `Track` is required to read a signal, `Mutate` to write one, and `Ui` to
+## create a computation or a node. A function's row therefore says which
+## phase it belongs to, and the checker rejects a write inside a memo or an
+## eager read inside a component body.
+
+pub type SourceId = usize
+pub type ComputationId = usize
+pub type OwnerId = usize
+## A host node. Node 0 is the mount point the host provides.
+pub type NodeId = usize
+## An event handler the runtime registered. Handler 0 means "stop".
+pub type HandlerId = usize
+
+## Installed around every tracked computation. `depend` records one source
+## the running computation read.
+pub trait Track:
+    fn depend(&mut self, source: SourceId) -> void
+
+## Installed where signals may be written. `invalidate` is told about each
+## write; flushing is the graph's business, not the provider's.
+pub trait Mutate:
+    fn invalidate(&mut self, source: SourceId) -> void
+
+## Installed while a component body runs. `owner` names the owner that
+## retains every computation the body creates, and `parent` the node new
+## nodes are appended to.
+pub trait Ui:
+    fn owner(&self) -> OwnerId
+    fn parent(&self) -> NodeId
+
+## The `Track` provider the runtime installs around a computation.
+pub struct Collector:
+    pub deps: List[SourceId]
+
+impl Track for Collector:
+    fn depend(&mut self, source: SourceId) -> void:
+        if !self.deps.contains(source):
+            self.deps.push(source)
+
+## A `Track` provider that records nothing: reads under it are untracked.
+pub struct NoTrack: pass
+
+impl Track for NoTrack:
+    fn depend(&mut self, source: SourceId) -> void:
+        pass
+
+## The `Mutate` provider: counts writes, nothing more.
+pub struct Scheduler:
+    pub writes: usize
+
+impl Mutate for Scheduler:
+    fn invalidate(&mut self, source: SourceId) -> void:
+        self.writes += 1
+
+## The `Ui` provider: one owner and one parent node.
+pub struct Scope:
+    pub owner: OwnerId
+    pub parent: NodeId
+
+impl Ui for Scope:
+    fn owner(&self) -> OwnerId:
+        self.owner
+
+    fn parent(&self) -> NodeId:
+        self.parent

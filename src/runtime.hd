@@ -1,0 +1,95 @@
+## The program-wide UI runtime: the pending command list, the handler
+## table, and the id counters. `mount` builds a tree; `dispatch` routes
+## one event to its handler and flushes.
+use std.function.FnMut
+use pkg.keys.{HandlerId, Mutate, NodeId, NoTrack, OwnerId, Scheduler, Scope, Track, Ui}
+use pkg.graph.{flush, graph, new_owner}
+use pkg.reactive.batch
+use pkg.surface.{DomCommand, Surface, UiEvent}
+
+pub struct Runtime:
+    pub out: List[DomCommand]
+    pub handlers: Map[HandlerId, fn(string) -> void $ Mutate]
+    pub next_node: usize
+    pub next_handler: usize
+
+RUNTIME := box(Runtime { out: [], handlers: {}, next_node: 1, next_handler: 1 })
+
+pub fn runtime() -> *mut Runtime:
+    RUNTIME
+
+## Queues one command for the next `take_commands`.
+pub fn emit(command: DomCommand) -> void:
+    runtime().out.push(command)
+
+## Makes a node id and emits its `Create`.
+pub fn create_node(kind: string) -> NodeId:
+    rt := runtime()
+    node := rt.next_node
+    rt.next_node += 1
+    emit(.Create(node, kind))
+    node
+
+## Registers a handler and returns its id.
+pub fn register_handler[F < 'static & FnMut(string) -> void $ Mutate](mut handler: F) -> HandlerId:
+    rt := runtime()
+    id := rt.next_handler
+    rt.next_handler += 1
+    erased := fn(payload: string) -> void $ Mutate: handler(payload)
+    rt.handlers[id] = erased
+    id
+
+pub fn drop_handler(id: HandlerId) -> void:
+    _ := runtime().handlers.remove(id)
+
+## Drains and returns the queued commands.
+pub fn take_commands() -> List[DomCommand]:
+    rt := runtime()
+    commands := rt.out
+    rt.out = []
+    commands
+
+## Builds `root` under a fresh owner, appending to node 0, and flushes.
+## Returns the owner so the tree can be disposed.
+pub fn mount(root: fn() -> void $ Ui) -> OwnerId:
+    owner := new_owner(.None)
+    $.with(Ui=box(Scope { owner: owner, parent: 0 }), Track=box(NoTrack {})):
+        root()
+    flush()
+    owner
+
+## Runs the handler of `event` inside a batch, then flushes.
+pub fn dispatch(event: UiEvent) -> void:
+    found := runtime().handlers.get(event.handler)
+    match found:
+        .Some(handler) =>
+            payload := event.payload
+            $.with(Mutate=box(Scheduler { writes: 0 })):
+                batch(fn() -> void $ Mutate: handler(payload))
+        .None => pass
+    flush()
+
+## Resets ids and clears the queue and the handler table. For tests that
+## assert exact command lists.
+pub fn reset_for_test() -> void:
+    rt := runtime()
+    rt.out = []
+    rt.handlers = {}
+    rt.next_node = 1
+    rt.next_handler = 1
+    g := graph()
+    g.effects = []
+    g.flushing = false
+    g.batch_depth = 0
+
+## Mounts `root`, sends its commands, then loops: wait for an event,
+## dispatch it, send what changed. Returns when the host sends handler 0.
+pub fn run_app!(root: fn() -> void $ Ui) -> void $ Surface:
+    _ := mount(root)
+    $.use(Surface).apply!(take_commands())
+    while true:
+        event := $.use(Surface).next_event!()
+        if event.handler == 0:
+            break
+        dispatch(event)
+        $.use(Surface).apply!(take_commands())

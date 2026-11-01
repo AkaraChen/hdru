@@ -1,0 +1,84 @@
+use dep.ui.{
+    ReadSignal,
+    Signal,
+    Surface,
+    Ui,
+    button,
+    column,
+    for_each,
+    memo,
+    row,
+    run_app,
+    show,
+    signal,
+    text,
+    text_live,
+}
+
+@derive(Eq)
+struct Todo:
+    id: usize
+    title: string
+    done: bool
+
+fn toggle(id: usize, xs: List[Todo]) -> List[Todo]:
+    [for todo in xs => if todo.id == id: Todo { ...todo, done: !todo.done } else: todo]
+
+fn without(id: usize, xs: List[Todo]) -> List[Todo]:
+    xs.filter(fn(todo): todo.id != id)
+
+fn todo_row(todos: Signal[List[Todo]], todo: ReadSignal[Todo]) -> void $ Ui:
+    row(gap=8):
+        text_live:
+            if todo.get().done:
+                "[x] ${todo.get().title}"
+            else:
+                "[ ] ${todo.get().title}"
+        button(
+            "toggle",
+            fn():
+                todos.update(fn(xs): toggle(todo.peek().id, xs))
+            ,
+        )
+        button(
+            "remove",
+            fn():
+                todos.update(fn(xs): without(todo.peek().id, xs))
+            ,
+        )
+
+fn app() -> void $ Ui:
+    todos := signal(
+        [
+            Todo { id: 1, title: "write the core", done: true },
+            Todo { id: 2, title: "write the builders", done: false },
+            Todo { id: 3, title: "ship a browser demo", done: false },
+        ],
+    )
+    next_id := signal(4)
+    remaining := memo:
+        todos.get().filter(fn(todo): !todo.done).len()
+    column(gap=8):
+        text_live:
+            "${remaining.get()} left"
+        for_each(todos.read(), fn(todo): todo.id, fn(todo): todo_row(todos, todo))
+        row(gap=8):
+            button(
+                "add",
+                fn():
+                    id := next_id.peek()
+                    next_id.set(id + 1)
+                    todos.update(fn(xs): [xs..., Todo { id: id, title: "todo $id", done: false }])
+                ,
+            )
+            button(
+                "reverse",
+                fn():
+                    todos.update(fn(xs): xs.reversed())
+                ,
+            )
+        show(fn(): remaining.get() == 0):
+            text("all done")
+
+pub fn main!() -> void $ Surface:
+    run_app!(app)

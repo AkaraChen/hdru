@@ -1,0 +1,96 @@
+use pkg.{
+    Signal,
+    Ui,
+    UiEvent,
+    button,
+    column,
+    dispatch,
+    mount,
+    owned,
+    provide,
+    reset_for_test,
+    signal,
+    take_commands,
+    text,
+    text_live,
+    use_context,
+}
+use std.testing.assert_equal
+
+struct Theme:
+    name: string
+
+struct Other:
+    label: string
+
+fn themed_text() -> void $ Ui:
+    name := match use_context::[Theme]("theme"):
+        .Some(theme) => theme.name
+        .None => "none"
+    text(name)
+
+it("a descendant reads what an ancestor provided, through any depth"):
+    reset_for_test()
+    _ := mount:
+        provide("theme", Theme { name: "dark" })
+        column:
+            column:
+                themed_text()
+    commands := take_commands()
+    assert_equal(commands.contains(.SetText(3, "dark")), true, reason="found two levels up")
+
+it("a missing key or another type is None"):
+    reset_for_test()
+    _ := mount:
+        provide("theme", Other { label: "not a theme" })
+        column:
+            themed_text()
+    commands := take_commands()
+    assert_equal(commands.contains(.SetText(2, "none")), true, reason="wrong type")
+
+it("a nearer provide shadows an outer one"):
+    reset_for_test()
+    _ := mount:
+        provide("theme", Theme { name: "outer" })
+        column:
+            themed_text()
+            owned:
+                provide("theme", Theme { name: "inner" })
+                themed_text()
+            themed_text()
+    commands := take_commands()
+    assert_equal(commands.contains(.SetText(2, "outer")), true, reason="outer")
+    assert_equal(commands.contains(.SetText(3, "inner")), true, reason="inner shadows")
+    assert_equal(
+        commands.contains(.SetText(4, "outer")),
+        true,
+        reason="back outside the inner scope",
+    )
+
+fn shared_counter() -> void $ Ui:
+    match use_context::[Signal[i32]]("count"):
+        .Some(count) =>
+            text_live:
+                "Count: ${count.get()}"
+            button(
+                "+",
+                fn():
+                    count.update(fn(n): n + 1)
+                ,
+            )
+        .None => text("no count")
+
+it("a signal provided through context is shared state"):
+    reset_for_test()
+    _ := mount:
+        provide("count", signal(+0))
+        column:
+            shared_counter()
+            shared_counter()
+    _ := take_commands()
+    dispatch(UiEvent { handler: 1, payload: "" })
+    assert_equal(
+        take_commands(),
+        [.SetText(2, "Count: 1"), .SetText(4, "Count: 1")],
+        reason="both readers see the write",
+    )

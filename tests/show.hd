@@ -1,0 +1,93 @@
+use pkg.{
+    DomCommand,
+    Ui,
+    UiEvent,
+    button,
+    column,
+    dispatch,
+    mount,
+    reset_for_test,
+    show,
+    signal,
+    take_commands,
+    text,
+    text_live,
+}
+use std.testing.assert_equal
+
+fn toggler() -> void $ Ui:
+    visible := signal(true)
+    outer := signal(+0)
+    column:
+        button(
+            "toggle",
+            fn():
+                visible.update(fn(v): !v)
+            ,
+        )
+        button(
+            "outer+",
+            fn():
+                outer.update(fn(n): n + 1)
+            ,
+        )
+        button("force", fn(): visible.set(true))
+        show(fn(): visible.get()):
+            inner := signal(+0)
+            text_live:
+                "Inner: ${inner.get()}"
+            text_live:
+                "Outer: ${outer.get()}"
+            button(
+                "inner+",
+                fn():
+                    inner.update(fn(n): n + 1)
+                ,
+            )
+        text("after")
+
+fn click(handler: usize) -> List[DomCommand]:
+    dispatch(UiEvent { handler: handler, payload: "" })
+    take_commands()
+
+it("show mounts its branch in place and keeps the node after it"):
+    reset_for_test()
+    _ := mount(toggler)
+    commands := take_commands()
+    assert_equal(commands.get(0), .Some(DomCommand.Create(1, "div")), reason="column")
+    assert_equal(commands.contains(.SetAttr(5, "class", "show")), true, reason="the fragment")
+    assert_equal(commands.contains(.Append(5, 6)), true, reason="inner text under the fragment")
+    assert_equal(commands.contains(.SetText(6, "Inner: 0")), true, reason="inner text")
+    assert_equal(commands.contains(.SetText(7, "Outer: 0")), true, reason="outer text")
+    assert_equal(commands.contains(.Listen(8, "click", 4)), true, reason="inner button")
+    assert_equal(commands.contains(.Append(1, 9)), true, reason="the text after the fragment")
+    assert_equal(commands.contains(.SetText(9, "after")), true, reason="after")
+
+it("hiding disposes the branch: its state, its bindings and its handlers"):
+    reset_for_test()
+    _ := mount(toggler)
+    _ := take_commands()
+    assert_equal(click(4), [.SetText(6, "Inner: 1")], reason="inner+ updates the inner text")
+    assert_equal(click(2), [.SetText(7, "Outer: 1")], reason="outer+ updates the outer text")
+    assert_equal(click(3), [], reason="forcing visible to the same value does nothing")
+    assert_equal(click(1), [.Clear(5)], reason="hide clears the fragment")
+    assert_equal(click(4), [], reason="the inner handler is gone")
+    assert_equal(click(2), [], reason="the outer binding inside the branch is gone")
+    assert_equal(
+        click(1),
+        [
+            .Create(10, "text"),
+            .Append(5, 10),
+            .SetText(10, "Inner: 0"),
+            .Create(11, "text"),
+            .Append(5, 11),
+            .SetText(11, "Outer: 2"),
+            .Create(12, "button"),
+            .Append(5, 12),
+            .SetText(12, "inner+"),
+            .Listen(12, "click", 5),
+        ],
+        reason="showing again rebuilds the branch: inner state reset, outer state current",
+    )
+    assert_equal(click(5), [.SetText(10, "Inner: 1")], reason="the new inner handler works")
+    assert_equal(click(2), [.SetText(11, "Outer: 3")], reason="the new outer binding works")

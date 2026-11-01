@@ -1,0 +1,8 @@
+[package]
+name = "counter"
+
+[dependencies]
+ui = { path = "../.." }
+
+[capabilities]
+"dep.ui.surface.Surface" = true

@@ -1,0 +1,94 @@
+## Keyed collections: `for_each` renders one row per item and keeps a row
+## alive across updates as long as its key is present.
+use std.function.Fn
+use std.hash.Hash
+use pkg.keys.{Mutate, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
+use pkg.graph.{Computation, dispose, new_computation, new_owner, run_computation}
+use pkg.reactive.{ReadSignal, Signal, signal}
+use pkg.runtime.{create_node, emit}
+
+struct Row[T < 'static]:
+    owner: OwnerId
+    node: NodeId
+    item: Signal[T]
+
+struct Rows[T < 'static, K < 'static & Eq & Hash]:
+    rows: Map[K, Row[T]]
+    order: List[K]
+
+## Renders `render` once per item of `items`, keyed by `key`. When the
+## list changes: a row whose key stays receives the new item through its
+## signal, a new key mounts a row, a missing key disposes one, and order
+## changes emit `MoveBefore` only where the order differs. Each row renders
+## into its own fragment node under one list node.
+pub fn for_each[
+    T < 'static,
+    K < 'static & Eq & Hash,
+    KF < 'static & Fn(T) -> K,
+    R < 'static & Fn(ReadSignal[T]) -> void $ Ui,
+](items: ReadSignal[List[T]], key: KF, render: R) -> void $ Ui:
+    ui := $.use(Ui)
+    owner := ui.owner()
+    parent := ui.parent()
+    fragment := create_node("div")
+    emit(.SetAttr(fragment, "class", "list"))
+    emit(.Append(parent, fragment))
+    state := box(Rows::[T, K] { rows: {}, order: [] })
+    run := fn() -> bool $ Track + Mutate:
+        list := items.get()
+        let mut new_keys: List[K] = []
+        for item in list:
+            new_keys.push(key(item))
+        old_order := state.order
+        let mut current: List[K] = []
+        for k in old_order:
+            if new_keys.contains(k):
+                current.push(k)
+            else:
+                row := state.rows[k]
+                dispose(row.owner)
+                emit(.Remove(row.node))
+                _ := state.rows.remove(k)
+        for item in list:
+            k := key(item)
+            if state.rows.contains_key(k):
+                state.rows[k].item.set(item)
+            else:
+                child := new_owner(.Some(owner))
+                item_signal := signal(item)
+                node := create_node("div")
+                emit(.SetAttr(node, "class", "item"))
+                emit(.Append(fragment, node))
+                $.with(Ui=box(Scope { owner: child, parent: node }), Track=box(NoTrack {})):
+                    render(item_signal.read())
+                state.rows[k] = Row { owner: child, node: node, item: item_signal }
+                current.push(k)
+        let index = 0
+        while index < new_keys.len():
+            wanted := new_keys[index]
+            if current[index] != wanted:
+                match current.index_of(wanted):
+                    .Some(from) => _ := current.remove_at(from)
+                    .None => pass
+                current.insert(index, wanted)
+                emit(
+                    .MoveBefore(
+                        fragment,
+                        state.rows[wanted].node,
+                        .Some(state.rows[current[index + 1]].node),
+                    ),
+                )
+            index += 1
+        state.order = current
+        false
+    computation := new_computation(
+        Computation {
+            run: run,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(computation)

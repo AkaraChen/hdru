@@ -1,0 +1,237 @@
+# Design record: the `ui` package
+
+Checked against the `hd-lang` checkout at commit `cf5040b4a` (2026-11-01).
+The implementation plan is `bootstrap.md`; this file records what the code
+actually does and why, phase by phase.
+
+## Phase 0: toolchain spike (2026-11-01)
+
+Twelve probes under a temporary `spikes/` folder, each checked with
+`hd check`, run with `hd FILE`, or tested with `hd test`. The folder was
+deleted after this table was written.
+
+| Probe | Predicted | Result | First try? |
+| --- | --- | --- | --- |
+| Rows on `self` methods; `'static` bound on a struct type parameter; `impl[T < 'static] Signal[T]` | compile | compile, ran | yes |
+| Trailing block on `memo:` with `F < 'static & Fn() -> T $ Track` | compile | compile, ran | yes |
+| `count.set(0)` inside that block | `type-mismatch` | fails with `unsatisfied-trait-bound` | prediction wrong on the code |
+| Eager `count.get()` in a `column:` block bounded by `Fn() -> void $ Ui` | `type-mismatch` | fails with `unsatisfied-trait-bound` | prediction wrong on the code |
+| Erase `F` into `fn() -> string $ Track`, store in a struct field, push into a `List` behind `*mut`, run later | compile | compile, ran | no: a field holding a function is called as `(binding.run)()`, and a struct named by a `pub` signature must be `pub` |
+| `FnMut` handler with a mutating capture, erased into `fn() -> void $ Mutate`, kept in a `Map` | compile | compile, ran | no: see the row rule below |
+| Trailing block on `effect:` bounded by `FnMut() -> void $ Track + Mutate` | compile | compile, ran | yes |
+| `$.with(Track=c)` with `c: *mut Collector` | compile | compile, ran | yes |
+| `$.with(Track=c)` with `c: *Collector` | `mutable-upgrade` | `mutable-upgrade` | yes |
+| Callee's `$.with(Track=...)` wins for a callback whose row keeps `Track`; a `$.use` capture is fixed lexically | run, assert | 2 tests pass | no: see the `Fn` value rule below |
+| `batch` installs a different `Mutate` for its body and forwards to the outer one | compile | compile, ran | yes |
+| `@host pub trait Surface` mapped in `hd.toml`, hd fake bound with `$.with` in `tests/` | compile, run | 2 tests pass on node | no: `pub use pkg.surface.{Surface}` needs the braces |
+| Doc test with `# error: type-mismatch` | pass | pass | yes |
+
+Three rules the probes established that the plan did not state, and that
+every signature in the library now follows:
+
+1. **A closure's row must equal the bound's row exactly.** `Fn(...) $ R`
+   and `FnMut(...) $ R` bounds match a function value's exact row
+   (`fn.trait.function-values`); row subsumption applies only to concrete
+   `fn` types. An unannotated closure takes its row from its body, so
+   `button("x", fn(): pass)` fails against `FnMut() -> void $ Mutate` and
+   must be written `fn() -> void $ Mutate: pass`. A trailing block is the
+   same closure and fails the same way. Consequences: a callback that uses
+   another requirement (say `Console`) must capture it lexically
+   (`console := $.use(Console)` before the block) rather than list it, and
+   every bound in the public API lists the one row the library will
+   re-install at run time, nothing more.
+2. **A concrete `fn` parameter cannot be stored.** `on_click: fn() -> void $ Mutate`
+   stored into a map is `local-reference-escapes` whatever the caller
+   passed, because the parameter has a fresh lifetime. So every retained
+   callback is a bare type parameter bounded by `'static & Fn/FnMut`, and
+   the library erases it into a concrete `fn` closure of its own.
+3. **An `Fn` bound takes only an inline closure or a function name.** A
+   closure first bound to a variable is a plain `fn` value and implements
+   only `FnMut` (`fn.trait.read-only.values`). `memo`, `text_live`, `show`
+   and `for_each` therefore take their callbacks inline; `button` and
+   `effect` use `FnMut` and accept either.
+
+Smaller facts: `$.with(K=v):` is an expression and may be the right-hand
+side of `:=`; a single file with a `tests:` block runs under
+`hd test FILE`; this `hd` build has no wasmtime engine (`--features
+wasmtime` would add it), so every gate in the plan runs on node only; the
+compile-fail code for a row violation is `unsatisfied-trait-bound`.
+
+## Phase 1: reactive core (2026-11-01)
+
+Files: `src/keys.hd`, `src/graph.hd`, `src/reactive.hd`, `src/owner.hd`,
+`tests/core.hd`. Gate: 13 cases green under `hd test` on node (11
+integration cases and 2 doc tests, one of them compile-fail).
+
+What the code does, where it departs from the plan, and why:
+
+- **One program-wide graph.** A top-level `GRAPH := box(Graph { ... })`
+  persists across calls (probed), so `signal(initial)` needs no creation
+  key or graph argument, as Solid's `createSignal` needs none. Sources,
+  computations and owners live in three maps keyed by one id counter.
+- **Lazy memos with versions, not heights.** Each source has a version;
+  each computation records `(source, version seen)`. A write bumps the
+  version and marks direct observers `Dirty` and transitive observers
+  `Check`; effects enter a queue when first marked. A read of a `Check`
+  memo refreshes the memos it depends on and reruns only when a seen
+  version moved, so a diamond's join runs once and an equal memo value
+  stops propagation without a height table. This is the Reactively
+  algorithm. The plan's topological height was dropped because the
+  version check gives equal-value suppression for free and needs no
+  ordering of the dirty set.
+- **Providers never run user code.** `ref.excl.alias.call-loan` makes a
+  method call through `*mut` a run-time loan for the whole call, so a
+  provider method that called back into user code would panic with
+  `borrow-conflict` when that code used the same provider again. `Track`
+  and `Mutate` providers are therefore leaves (`Collector` records,
+  `Scheduler` counts), and flushing is a free function on the graph.
+  `set` flushes after its `invalidate` call returns, and a nested flush
+  from inside an effect only queues. `batch` depth lives on the graph.
+- **Retained callbacks are `'static` bounds, non-retained ones are
+  concrete `fn` types.** `batch`, `untrack`, `root` and `under` take
+  `fn(...) $ Row` parameters so a narrower closure fits by row
+  subsumption; `memo`, `effect`, `sync` and `on_cleanup` take bounded type
+  parameters, erase them into concrete closures, and so need the exact
+  row (phase 0, rule 1).
+- **`effect` and `sync`.** The review's one `effect` with row
+  `$ Track + Mutate` would reject the common read-only trailing block,
+  which cannot carry a row annotation. `effect` is `FnMut() -> void $ Track`
+  and `sync` is `FnMut() -> void $ Track + Mutate`; both run once at
+  creation and again at flush when a dependency's version moved. A block
+  that reads only through `untrack` has the empty row and is written as an
+  explicit closure, `effect(fn() -> void $ Track: ...)`; `tests/core.hd`
+  has one.
+- **`set` does not compare.** `Signal[T < 'static]` has no `Eq` bound, so
+  every write marks; `memo` requires `Eq` and suppresses. Signal sources
+  are never freed (no owner); memo sources are removed on dispose.
+- **Computation bodies are stored as `fn() -> bool $ Track + Mutate`** and
+  run under a collector plus a throwaway `Scheduler`, so a `sync` body may
+  write while a memo body, bounded `$ Track`, cannot.
+
+## Phase 2: owners, builders and the command stream (2026-11-01)
+
+Files: `src/surface.hd`, `src/runtime.hd`, `src/builders.hd`,
+`src/recorder.hd`, `tests/builders.hd`. Gate: command-list tests green
+(mount order, one `SetText` per click, nothing for an equal text, nothing
+for an unknown handler) plus the compile-fail doc test for an eager read
+in a `column:` block.
+
+- **`Ui` is read-only data.** The provider is `Scope { owner, parent }`;
+  a container runs its children block under a fresh `Scope` whose parent
+  is the new node. Everything mutable (the pending command list, the
+  handler table, the node and handler counters) is a program-wide
+  `Runtime` box, as the graph is, so no provider method ever runs user
+  code and no builder captures a provider.
+- **Command order is Create, Append, then content.** A node is attached
+  before its text or children are set, so a host that applies commands
+  one by one never holds a detached subtree.
+- **`show` renders into a fragment node that stays put.** Hiding emits
+  `Clear(fragment)` and disposes the branch owner; showing again rebuilds
+  into the same fragment, so the branch keeps its place among its
+  siblings. `DomCommand.Clear` was added for this; `for_each` will use the
+  same fragment-per-row shape so a row has one node to move or remove.
+- **Handlers take a payload.** The table holds
+  `fn(string) -> void $ Mutate`; `button` ignores the payload, an input
+  builder will pass the value. `register_handler` is generic with an
+  erasing closure because a concrete `fn` parameter cannot be stored
+  (phase 0, rule 2). A handler is dropped by a cleanup on its owner.
+- **`dispatch` runs the handler inside `batch`** under a throwaway
+  `Scheduler`, then flushes, so a handler that writes several signals
+  produces one round of effects. Node 0 is the host's mount point; handler
+  0 means stop.
+- **`Recorder`** implements `Surface` in hd: `apply!` logs, `next_event!`
+  pops a scripted event or returns handler 0. It is public so an app's
+  own tests can drive the loop without JavaScript.
+
+## Phase 3: `show` (2026-11-01)
+
+`tests/show.hd`, green first try. The branch owner is a child of the
+component's owner, so disposing the component disposes the branch. A
+handler inside a hidden branch is gone (its owner's cleanup dropped it),
+a binding inside it no longer emits, an inner signal starts over when the
+branch is shown again, and an outer signal read inside the branch shows
+its current value. Forcing the condition to the value it already has
+reruns the `show` computation (writes do not compare) but emits nothing.
+
+## Phase 4: `for_each` (2026-11-01)
+
+`src/collections.hd`, `tests/for_each.hd`, green first try.
+
+- The reconciler is one effect whose only tracked read is `items.get()`;
+  rows render under `NoTrack` so a row's own bindings are separate
+  computations. Each row has a child owner, a fragment node of class
+  `item`, and a `Signal[T]` whose read half is what `render` receives.
+- Order: the old order minus removed keys, plus new keys in creation
+  order, is walked against the wanted order; at each index where they
+  differ the wanted row is moved before the row currently there, so an
+  append emits no move and a prepend or a reverse of two emits one.
+- `render` takes a parameter, so it is an explicit closure argument, not
+  a trailing block (`fn.trailing.parameterized`); the test shows the
+  shape. Duplicate keys are not diagnosed: the last item wins.
+
+## Phase 5: context and the component boundary (2026-11-01)
+
+`src/context.hd`, `tests/context.hd`; `owned` in `src/owner.hd`.
+
+- Context is owner-scoped, as Solid's is: `provide(key, value)` stores a
+  boxed value on the current owner, `use_context::[T](key)` walks the
+  owner chain. A container such as `column` makes no owner, so a
+  `provide` inside one lands on the enclosing owner; `owned:` is the
+  component boundary that makes a child owner (as `show` and `for_each`
+  rows do) and so scopes a `provide` and the cleanups inside it.
+- Values are keyed by string and recovered with `downcast_ref` on a
+  `*mut dyn Inspectable`. `downcast_ref`/`downcast_mut` yield a local
+  reference, so `use_context` returns a copy (`T?`). Shared state goes
+  through context as a handle: a `Signal` is a declared struct and so
+  inspectable; `tests/context.hd` provides one and two readers see one
+  write.
+- The other three app-level context answers from the review stand:
+  lexical capture of a `$.use` value before a block is the cheapest, an
+  app-level adapter over `root` the most explicit, and `provide` the
+  library fallback.
+
+## Phase 6: the host trait and the Node loop (2026-11-01)
+
+`run_app!` in `src/runtime.hd`, `tests/loop.hd`, `providers/dom.mjs`,
+`examples/counter`.
+
+- `run_app!(root) $ Surface` mounts, sends the first batch through
+  `apply!`, then loops on `next_event!` → `dispatch` → `apply!` until an
+  event names handler 0. It calls `$.use(Surface)` fresh for each call so
+  no reference into the provider is live while a handler runs.
+- The scripted-surface test drives the counter through `Recorder` with
+  no JavaScript. The example app's manifest grants
+  `"dep.ui.surface.Surface" = true`; `hd build` writes
+  `counter.host.mjs` beside the wasm, whose schema shows how values cross:
+  an enum is `{ tag, fields }`, an optional is a value or `null`, `usize`
+  is a 32-bit `Number`, and a `wait: "may"` method may return a Promise.
+- One provider file serves both hosts. `providers/dom.mjs` picks the DOM
+  backend when `document` exists and otherwise an in-memory tree that
+  prints each batch and answers the clicks in `UI_CLICKS`, then handler
+  0. `UI_CLICKS=2,2,1 hd run --engine node` in `examples/counter` prints
+  the mount batch of 19 commands, then one `SetText` per click.
+
+## Phase 7: the browser page (2026-11-01)
+
+`web/index.html`, `web/todos.html`, `web/main.js`, `web/build.sh`,
+`examples/todos`.
+
+- The page bundles `../hd-lang/host/web.ts` (`createWebHost` over the
+  platform-neutral core), `host/package-providers.ts`
+  (`createPackageRuntime`), the generated `counter.host.mjs`, and
+  `providers/dom.mjs` with esbuild (`pnpm dlx esbuild@0.28.2`, the
+  version `hd-lang/package.json` pins). It passes the glue's first
+  selector as a grant, `createPackageRuntime`, and
+  `packageBindings: (runtime) => generated.bind(runtime, providers)` in
+  the host env, exactly as `host/run.ts` does for Node. One glue file
+  serves both examples because the trait belongs to the ui package.
+- The program runs on the main thread; `next_event` returns a Promise
+  that a DOM listener resolves, which the `wait: "may"` method allows.
+- Verified with a real browser: the counter mounts with the same 19
+  commands as under Node, and each click produces one `SetText` batch in
+  the console; the todos page toggles a row and adds one with the
+  expected batches.
+- The gap: `hd fmt` rewrote `tests/for_each.hd`'s render closure, which
+  holds a trailing `text_live:` block inside a call's brackets, into a
+  form the parser rejects (`trailing-block-position`). The test now
+  writes that block as an explicit closure. Logged in the hd writing log.

@@ -1,0 +1,260 @@
+## The dependency graph: one program-wide object holding every source,
+## computation and owner. Nothing here calls user code while holding a
+## reference into the graph; every walk copies its list out first.
+use std.inspect.Inspectable
+use pkg.keys.{Collector, ComputationId, Mutate, OwnerId, Scheduler, SourceId, Track}
+
+@derive(Eq)
+pub enum State:
+    Clean
+    Check
+    Dirty
+
+@derive(Eq)
+pub enum Kind:
+    Memo
+    Effect
+
+pub struct Computation:
+    ## Recomputes; returns true when a memo's value changed.
+    pub run: fn() -> bool $ Track + Mutate
+    pub kind: Kind
+    pub state: State
+    ## Each source read by the last run, with the version seen then.
+    pub deps: List[(SourceId, usize)]
+    pub owner: OwnerId
+    ## A memo's output source.
+    pub source: SourceId?
+
+pub struct Source:
+    pub version: usize
+    pub observers: List[ComputationId]
+    ## The memo that writes this source, if any.
+    pub producer: ComputationId?
+
+pub struct Owner:
+    pub parent: OwnerId?
+    pub computations: List[ComputationId]
+    pub children: List[OwnerId]
+    pub cleanups: List[fn() -> void]
+    ## Values an ancestor made available to its subtree by key.
+    pub context: Map[string, *mut dyn Inspectable]
+
+pub struct Graph:
+    pub sources: Map[SourceId, Source]
+    pub computations: Map[ComputationId, Computation]
+    pub owners: Map[OwnerId, Owner]
+    pub next_id: usize
+    pub effects: List[ComputationId]
+    pub flushing: bool
+    pub batch_depth: usize
+
+GRAPH := box(
+    Graph {
+        sources: {},
+        computations: {},
+        owners: {},
+        next_id: 1,
+        effects: [],
+        flushing: false,
+        batch_depth: 0,
+    },
+)
+
+pub fn graph() -> *mut Graph:
+    GRAPH
+
+fn rank(state: State) -> usize:
+    match state:
+        .Clean => 0
+        .Check => 1
+        .Dirty => 2
+
+fn fresh_id() -> usize:
+    g := graph()
+    id := g.next_id
+    g.next_id += 1
+    id
+
+pub fn new_source() -> SourceId:
+    id := fresh_id()
+    graph().sources[id] = Source { version: 0, observers: [], producer: .None }
+    id
+
+pub fn new_owner(parent: OwnerId?) -> OwnerId:
+    id := fresh_id()
+    g := graph()
+    g.owners[id] = Owner {
+        parent: parent,
+        computations: [],
+        children: [],
+        cleanups: [],
+        context: {},
+    }
+    match parent:
+        .Some(p) => g.owners[p].children.push(id)
+        .None => pass
+    id
+
+pub fn new_computation(computation: Computation) -> ComputationId:
+    id := fresh_id()
+    g := graph()
+    g.computations[id] = computation
+    g.owners[computation.owner].computations.push(id)
+    match computation.source:
+        .Some(source) => g.sources[source].producer = .Some(id)
+        .None => pass
+    id
+
+## A signal was written: bump its version and mark its observers.
+pub fn mark_write(source: SourceId) -> void:
+    g := graph()
+    g.sources[source].version += 1
+    observers := g.sources[source].observers
+    for observer in observers:
+        stale(observer, .Dirty)
+
+fn stale(id: ComputationId, state: State) -> void:
+    g := graph()
+    if !g.computations.contains_key(id):
+        return
+    old := g.computations[id].state
+    if rank(old) >= rank(state):
+        return
+    g.computations[id].state = state
+    if old != .Clean:
+        return
+    comp := g.computations[id]
+    if comp.kind == .Effect:
+        g.effects.push(id)
+    match comp.source:
+        .Some(source) =>
+            observers := g.sources[source].observers
+            for observer in observers:
+                stale(observer, .Check)
+        .None => pass
+
+fn source_version(source: SourceId) -> usize?:
+    g := graph()
+    if g.sources.contains_key(source): .Some(g.sources[source].version) else: .None
+
+## Brings one computation up to date: a `Check` computation first refreshes
+## the memos it depends on and reruns only when one of them changed.
+pub fn ensure_fresh(id: ComputationId) -> void:
+    g := graph()
+    if !g.computations.contains_key(id):
+        return
+    if g.computations[id].state == .Check:
+        deps := g.computations[id].deps
+        for (source, seen) in deps:
+            producer := if g.sources.contains_key(source): g.sources[source].producer else: .None
+            match producer:
+                .Some(p) => ensure_fresh(p)
+                .None => pass
+            changed := match source_version(source):
+                .Some(version) => version != seen
+                .None => true
+            if changed:
+                if g.computations.contains_key(id):
+                    g.computations[id].state = .Dirty
+                break
+    if !g.computations.contains_key(id):
+        return
+    if g.computations[id].state == .Dirty:
+        run_computation(id)
+    else:
+        g.computations[id].state = .Clean
+
+fn unobserve(source: SourceId, id: ComputationId) -> void:
+    g := graph()
+    if !g.sources.contains_key(source):
+        return
+    match g.sources[source].observers.index_of(id):
+        .Some(index) => _ := g.sources[source].observers.remove_at(index)
+        .None => pass
+
+## Records `read` as the sources `id` depends on, with their current
+## versions, and marks `id` clean.
+pub fn subscribe(id: ComputationId, read: List[SourceId]) -> void:
+    g := graph()
+    if !g.computations.contains_key(id):
+        return
+    let mut deps: List[(SourceId, usize)] = []
+    for source in read:
+        if g.sources.contains_key(source):
+            g.sources[source].observers.push(id)
+            deps.push((source, g.sources[source].version))
+    g.computations[id].deps = deps
+    g.computations[id].state = .Clean
+
+## Runs one computation under a fresh collector and re-subscribes it.
+pub fn run_computation(id: ComputationId) -> void:
+    g := graph()
+    comp := g.computations[id]
+    for (source, _) in comp.deps:
+        unobserve(source, id)
+    collector := box(Collector { deps: [] })
+    changed := $.with(Track=collector, Mutate=box(Scheduler { writes: 0 })):
+        (comp.run)()
+    if !g.computations.contains_key(id):
+        return
+    subscribe(id, collector.deps)
+    if changed:
+        match comp.source:
+            .Some(source) =>
+                if g.sources.contains_key(source):
+                    g.sources[source].version += 1
+            .None => pass
+
+## Runs every queued effect until none is left. Re-entrant calls return at
+## once; the outer flush drains what they queued.
+pub fn flush() -> void:
+    g := graph()
+    if g.flushing:
+        return
+    g.flushing = true
+    let rounds = 0
+    while !g.effects.is_empty():
+        queue := g.effects
+        g.effects = []
+        for id in queue:
+            ensure_fresh(id)
+        rounds += 1
+        if rounds > 1000:
+            g.flushing = false
+            panic("ui: effects did not settle after 1000 rounds")
+    g.flushing = false
+
+fn drop_computation(id: ComputationId) -> void:
+    g := graph()
+    if !g.computations.contains_key(id):
+        return
+    comp := g.computations[id]
+    for (source, _) in comp.deps:
+        unobserve(source, id)
+    _ := g.computations.remove(id)
+    match comp.source:
+        .Some(source) => _ := g.sources.remove(source)
+        .None => pass
+
+## Disposes an owner: its children first, then its computations, then its
+## cleanups, each list copied out before any user code runs.
+pub fn dispose(owner: OwnerId) -> void:
+    g := graph()
+    if !g.owners.contains_key(owner):
+        return
+    record := g.owners[owner]
+    _ := g.owners.remove(owner)
+    match record.parent:
+        .Some(p) =>
+            if g.owners.contains_key(p):
+                match g.owners[p].children.index_of(owner):
+                    .Some(index) => _ := g.owners[p].children.remove_at(index)
+                    .None => pass
+        .None => pass
+    for child in record.children:
+        dispose(child)
+    for id in record.computations:
+        drop_computation(id)
+    for cleanup in record.cleanups:
+        cleanup()

@@ -1,0 +1,34 @@
+## The host boundary: the commands the runtime sends and the events it
+## receives, and the package-owned host trait that carries them.
+use pkg.keys.{HandlerId, NodeId}
+
+@derive(Eq, Debug)
+pub enum DomCommand:
+    ## Makes a node of `kind`: "div", "button" or "text".
+    Create(node: NodeId, kind: string)
+    ## Appends `child` as the last child of `parent`.
+    Append(parent: NodeId, child: NodeId)
+    ## Moves `child` under `parent`, before `before`, or last when `.None`.
+    MoveBefore(parent: NodeId, child: NodeId, before: NodeId?)
+    SetText(node: NodeId, text: string)
+    SetAttr(node: NodeId, name: string, value: string)
+    ## Reports `event` on `node` as `UiEvent { handler, payload }`.
+    Listen(node: NodeId, event: string, handler: HandlerId)
+    ## Removes `node` and its subtree.
+    Remove(node: NodeId)
+    ## Removes every child of `node`, keeping the node.
+    Clear(node: NodeId)
+
+@derive(Eq, Debug)
+pub struct UiEvent:
+    pub handler: HandlerId
+    ## The input value for an input event; empty for a click.
+    pub payload: string
+
+## What a host must provide. `apply!` consumes one batch of commands;
+## `next_event!` waits for the next user event. A handler of 0 ends the
+## event loop.
+@host
+pub trait Surface:
+    fn apply!(&mut self, commands: List[DomCommand]) -> void
+    fn next_event!(&mut self) -> UiEvent

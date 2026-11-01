@@ -1,0 +1,26 @@
+## An hd `Surface` for tests and scripted runs: `apply!` logs every
+## command and `next_event!` pops a scripted event, or handler 0 (stop)
+## when the script is empty.
+use pkg.surface.{DomCommand, Surface, UiEvent}
+
+pub struct Recorder:
+    pub log: List[DomCommand]
+    pub events: List[UiEvent]
+
+impl Surface for Recorder:
+    fn apply!(&mut self, commands: List[DomCommand]) -> void:
+        for command in commands:
+            self.log.push(command)
+
+    fn next_event!(&mut self) -> UiEvent:
+        if self.events.is_empty():
+            UiEvent { handler: 0, payload: "" }
+        else:
+            self.events.remove_at(0)
+
+## A recorder that will answer `clicks` in order, then stop.
+pub fn scripted(clicks: List[usize]) -> *mut Recorder:
+    let mut events: List[UiEvent] = []
+    for handler in clicks:
+        events.push(UiEvent { handler: handler, payload: "" })
+    box(Recorder { log: [], events: events })

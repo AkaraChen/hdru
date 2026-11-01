@@ -1,0 +1,108 @@
+use pkg.{
+    DomCommand,
+    UiEvent,
+    button,
+    column,
+    dispatch,
+    mount,
+    reset_for_test,
+    row,
+    signal,
+    take_commands,
+    text,
+    text_live,
+}
+use pkg.{Ui}
+use std.testing.assert_equal
+
+fn counter() -> void $ Ui:
+    count := signal(+0)
+    column(gap=8):
+        text_live:
+            "Count: ${count.get()}"
+        row:
+            button(
+                "-",
+                fn():
+                    count.update(fn(n): n - 1)
+                ,
+            )
+            button(
+                "+",
+                fn():
+                    count.update(fn(n): n + 1)
+                ,
+            )
+            button("same", fn(): count.set(count.peek()))
+
+it("mounting the counter emits the tree in order"):
+    reset_for_test()
+    _ := mount(counter)
+    let expected: List[DomCommand] = [
+        .Create(1, "div"),
+        .SetAttr(1, "class", "column"),
+        .SetAttr(1, "style", "gap:8px"),
+        .Append(0, 1),
+        .Create(2, "text"),
+        .Append(1, 2),
+        .SetText(2, "Count: 0"),
+        .Create(3, "div"),
+        .SetAttr(3, "class", "row"),
+        .Append(1, 3),
+        .Create(4, "button"),
+        .Append(3, 4),
+        .SetText(4, "-"),
+        .Listen(4, "click", 1),
+        .Create(5, "button"),
+        .Append(3, 5),
+        .SetText(5, "+"),
+        .Listen(5, "click", 2),
+        .Create(6, "button"),
+        .Append(3, 6),
+        .SetText(6, "same"),
+        .Listen(6, "click", 3),
+    ]
+    assert_equal(take_commands(), expected, reason="the mount command list")
+
+it("one click emits exactly one SetText and an equal text emits nothing"):
+    reset_for_test()
+    _ := mount(counter)
+    _ := take_commands()
+    dispatch(UiEvent { handler: 2, payload: "" })
+    assert_equal(take_commands(), [.SetText(2, "Count: 1")], reason="plus")
+    dispatch(UiEvent { handler: 1, payload: "" })
+    assert_equal(take_commands(), [.SetText(2, "Count: 0")], reason="minus")
+    dispatch(UiEvent { handler: 3, payload: "" })
+    assert_equal(take_commands(), [], reason="same text, no command")
+    dispatch(UiEvent { handler: 99, payload: "" })
+    assert_equal(take_commands(), [], reason="unknown handler, no command")
+
+it("static text and nesting append to the right parent"):
+    reset_for_test()
+    _ := mount:
+        column:
+            text("a")
+            row:
+                text("b")
+            text("c")
+    assert_equal(
+        take_commands(),
+        [
+            .Create(1, "div"),
+            .SetAttr(1, "class", "column"),
+            .Append(0, 1),
+            .Create(2, "text"),
+            .Append(1, 2),
+            .SetText(2, "a"),
+            .Create(3, "div"),
+            .SetAttr(3, "class", "row"),
+            .Append(1, 3),
+            .Create(4, "text"),
+            .Append(3, 4),
+            .SetText(4, "b"),
+            .Create(5, "text"),
+            .Append(1, 5),
+            .SetText(5, "c"),
+        ],
+        reason="nested parents",
+    )

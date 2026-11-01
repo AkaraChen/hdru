@@ -1,0 +1,132 @@
+## Node builders. Each reads `$.use(Ui)` into locals and never captures it;
+## a nested block runs under a fresh `Scope` whose parent is the new node.
+use std.function.{Fn, FnMut}
+use pkg.keys.{Mutate, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
+use pkg.graph.{Computation, dispose, graph, new_computation, new_owner, run_computation}
+use pkg.runtime.{create_node, drop_handler, emit, register_handler}
+
+struct Last:
+    text: string
+
+struct Shown:
+    child: OwnerId?
+
+fn container(class: string, gap: i32, children: fn() -> void $ Ui) -> void $ Ui:
+    ui := $.use(Ui)
+    owner := ui.owner()
+    parent := ui.parent()
+    node := create_node("div")
+    emit(.SetAttr(node, "class", class))
+    if gap > 0:
+        emit(.SetAttr(node, "style", "gap:${gap}px"))
+    emit(.Append(parent, node))
+    $.with(Ui=box(Scope { owner: owner, parent: node })):
+        children()
+
+## A vertical container. The block may only build; an eager read in it is
+## a compile error:
+##
+## ```hd
+## use pkg.{column, mount, signal, text}
+## _ := mount:
+##     count := signal(+1)
+##     column:
+##         n := count.get()  # error: type-mismatch
+##         text("$n")
+## ```
+pub fn column(gap: i32 = 0, children: fn() -> void $ Ui) -> void $ Ui:
+    container("column", gap, children)
+
+## A horizontal container.
+pub fn row(gap: i32 = 0, children: fn() -> void $ Ui) -> void $ Ui:
+    container("row", gap, children)
+
+## Static text.
+pub fn text(content: string) -> void $ Ui:
+    parent := $.use(Ui).parent()
+    node := create_node("text")
+    emit(.Append(parent, node))
+    emit(.SetText(node, content))
+
+## Text that follows the signals it reads. The block runs now and again
+## whenever one of them changes; equal text emits nothing.
+pub fn text_live[F < 'static & Fn() -> string $ Track](compute: F) -> void $ Ui:
+    ui := $.use(Ui)
+    owner := ui.owner()
+    parent := ui.parent()
+    node := create_node("text")
+    emit(.Append(parent, node))
+    last := box(Last { text: "" })
+    first := box(Last { text: "yes" })
+    run := fn() -> bool $ Track + Mutate:
+        next := compute()
+        if first.text == "yes" || next != last.text:
+            first.text = ""
+            last.text = next
+            emit(.SetText(node, next))
+        false
+    computation := new_computation(
+        Computation {
+            run: run,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(computation)
+
+## A button. The handler may write signals but not read them tracked; use
+## `peek` or `update`.
+pub fn button[F < 'static & FnMut() -> void $ Mutate](label: string, mut on_click: F) -> void $ Ui:
+    ui := $.use(Ui)
+    owner := ui.owner()
+    parent := ui.parent()
+    node := create_node("button")
+    emit(.Append(parent, node))
+    emit(.SetText(node, label))
+    handler := register_handler(fn(payload: string) -> void $ Mutate: on_click())
+    emit(.Listen(node, "click", handler))
+    graph().owners[owner].cleanups.push(fn() -> void: drop_handler(handler))
+
+## Mounts `branch` while `when` is true and disposes it when it turns
+## false. The branch keeps its place: it renders into a fragment node that
+## stays in the parent.
+pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui](
+    when: C,
+    branch: F,
+) -> void $ Ui:
+    ui := $.use(Ui)
+    owner := ui.owner()
+    parent := ui.parent()
+    fragment := create_node("div")
+    emit(.SetAttr(fragment, "class", "show"))
+    emit(.Append(parent, fragment))
+    shown := box(Shown { child: .None })
+    run := fn() -> bool $ Track + Mutate:
+        visible := when()
+        match shown.child:
+            .Some(child) =>
+                if !visible:
+                    dispose(child)
+                    emit(.Clear(fragment))
+                    shown.child = .None
+            .None =>
+                if visible:
+                    child := new_owner(.Some(owner))
+                    $.with(Ui=box(Scope { owner: child, parent: fragment }), Track=box(NoTrack {})):
+                        branch()
+                    shown.child = .Some(child)
+        false
+    computation := new_computation(
+        Computation {
+            run: run,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(computation)
