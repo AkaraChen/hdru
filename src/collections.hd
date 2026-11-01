@@ -1,11 +1,12 @@
 ## Keyed collections: `for_each` renders one row per item and keeps a row
 ## alive across updates as long as its key is present.
 use std.function.Fn
+use std.format.{Debug, debug}
 use std.hash.Hash
-use pkg.keys.{Mutate, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
+use pkg.keys.{Mutate, Reactive, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
 use pkg.graph.{Computation, dispose, new_computation, new_owner, run_computation}
 use pkg.reactive.{ReadSignal, Signal, signal}
-use pkg.runtime.{create_node, emit}
+use pkg.runtime.{create_node, emit, mark_built}
 
 struct Row[T < 'static]:
     owner: OwnerId
@@ -18,12 +19,14 @@ struct Rows[T < 'static, K < 'static & Eq & Hash]:
 
 ## Renders `render` once per item of `items`, keyed by `key`. When the
 ## list changes: a row whose key stays receives the new item through its
-## signal, a new key mounts a row, a missing key disposes one, and order
-## changes emit `MoveBefore` only where the order differs. Each row renders
-## into its own fragment node under one list node.
+## signal, written only when the item differs, so an unrelated change to
+## the list reruns nothing inside that row; a new key mounts a row, a
+## missing key disposes one, and order changes emit `MoveBefore` only where
+## the order differs. Each row renders into its own fragment node under one
+## list node. Two items with one key are a panic that names the key.
 pub fn for_each[
-    T < 'static,
-    K < 'static & Eq & Hash,
+    T < 'static & Eq,
+    K < 'static & Eq & Hash & Debug,
     KF < 'static & Fn(T) -> K,
     R < 'static & Fn(ReadSignal[T]) -> void $ Ui,
 ](items: ReadSignal[List[T]], key: KF, render: R) -> void $ Ui:
@@ -34,11 +37,14 @@ pub fn for_each[
     emit(.SetAttr(fragment, "class", "list"))
     emit(.Append(parent, fragment))
     state := box(Rows::[T, K] { rows: {}, order: [] })
-    run := fn() -> bool $ Track + Mutate:
+    run := fn() -> bool $ Reactive:
         list := items.get()
         let mut new_keys: List[K] = []
         for item in list:
-            new_keys.push(key(item))
+            k := key(item)
+            if new_keys.contains(k):
+                panic("ui: for_each: duplicate key ${debug(k)}")
+            new_keys.push(k)
         old_order := state.order
         let mut current: List[K] = []
         for k in old_order:
@@ -52,7 +58,7 @@ pub fn for_each[
         for item in list:
             k := key(item)
             if state.rows.contains_key(k):
-                state.rows[k].item.set(item)
+                state.rows[k].item.set_if_changed(item)
             else:
                 child := new_owner(.Some(owner))
                 item_signal := signal(item)
@@ -92,3 +98,4 @@ pub fn for_each[
         },
     )
     run_computation(computation)
+    mark_built(fragment)

@@ -30,3 +30,31 @@ pub fn use_context[T < 'static & Inspectable](key: string) -> T? $ Ui:
             .None => pass
         cursor = record.parent
     found
+
+## A value supplied to a subtree as a requirement key, so a component that
+## needs one names it in its row, `$ Ui + Provided[Theme]`, and a missing
+## provider is a compile error rather than `.None` at run time. One generic
+## key serves every type; `Provided[Theme]` and `Provided[Locale]` are two
+## keys.
+pub trait Provided[T]:
+    fn value(self) -> T
+
+## The provider `given` installs.
+pub struct Given[T]:
+    pub value: T
+
+impl[T] Provided[T] for Given[T]:
+    fn value(self) -> T:
+        self.value
+
+## Runs `body` with `value` available as `Provided[T]`. Every key of the
+## caller passes through, so `given` nests inside `column` and the other
+## builders, and they inside it. A component that names the key cannot be
+## mounted where nobody gave it; `mount`'s doc test shows the error.
+pub fn given[T < 'static, $R](value: T, body: fn() -> void $ R + Provided[T]) -> void $ R:
+    $.with(Provided[T]=box(Given { value: value })):
+        body()
+
+## The value the nearest `given` supplied for `T`.
+pub fn use_given[T]() -> T $ Provided[T]:
+    $.use(Provided[T]).value()

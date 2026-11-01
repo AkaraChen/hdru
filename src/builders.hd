@@ -1,69 +1,116 @@
 ## Node builders. Each reads `$.use(Ui)` into locals and never captures it;
 ## a nested block runs under a fresh `Scope` whose parent is the new node.
 use std.function.{Fn, FnMut}
-use pkg.keys.{Mutate, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
+use pkg.keys.{Mutate, Reactive, NoTrack, NodeId, OwnerId, Scope, Track, Ui}
 use pkg.graph.{Computation, dispose, graph, new_computation, new_owner, run_computation}
-use pkg.runtime.{create_node, drop_handler, emit, register_handler}
+use pkg.runtime.{create_node, drop_handler, emit, mark_built, register_handler}
+use pkg.runtime as rt
 
 struct Last:
     text: string
+    ## True until the first run has emitted.
+    first: bool
 
 struct Shown:
     child: OwnerId?
 
-fn container(class: string, gap: i32, children: fn() -> void $ Ui) -> void $ Ui:
+fn container[$R](
+    kind: string,
+    class: string,
+    gap: i32,
+    children: fn() -> void $ Ui + R,
+) -> void $ Ui + R:
     ui := $.use(Ui)
     owner := ui.owner()
     parent := ui.parent()
     node := create_node("div")
-    emit(.SetAttr(node, "class", class))
+    emit(.SetAttr(node, "class", classes(kind, class)))
     if gap > 0:
         emit(.SetAttr(node, "style", "gap:${gap}px"))
     emit(.Append(parent, node))
     $.with(Ui=box(Scope { owner: owner, parent: node })):
         children()
+    mark_built(node)
 
-## A vertical container. The block may only build; an eager read in it is
-## a compile error:
+# The class attribute of a node whose builder has a class of its own.
+fn classes(kind: string, class: string) -> string:
+    if class == "": kind else: "$kind $class"
+
+# Emits `class` on a node whose builder has none of its own, when given.
+fn set_class(node: NodeId, class: string) -> void:
+    if class != "":
+        emit(.SetAttr(node, "class", class))
+
+## A vertical container. The block runs now, under the caller's row: any
+## key the component names besides `Ui`, say `Theme`, reaches every block
+## nested inside it, and a key the component does not name is a compile
+## error. So an eager read in a component whose row is `$ Ui` fails:
 ##
 ## ```hd
-## use pkg.{column, mount, signal, text}
-## _ := mount:
+## use pkg.{Ui, column, signal, text}
+## fn view() -> void $ Ui:
 ##     count := signal(+1)
-##     column:
-##         n := count.get()  # error: type-mismatch
+##     column:  # error: missing-requirement
+##         n := count.get()
 ##         text("$n")
 ## ```
-pub fn column(gap: i32 = 0, children: fn() -> void $ Ui) -> void $ Ui:
-    container("column", gap, children)
+##
+## `class` adds to the `column` class, so `column(class="card", gap=8):`
+## makes a node of class `column card`. Name it: a positional argument
+## cannot skip `gap`.
+pub fn column[$R](
+    gap: i32 = 0,
+    class: string = "",
+    children: fn() -> void $ Ui + R,
+) -> void $ Ui + R:
+    container("column", class, gap, children)
 
-## A horizontal container.
-pub fn row(gap: i32 = 0, children: fn() -> void $ Ui) -> void $ Ui:
-    container("row", gap, children)
+## A horizontal container; its block runs under the caller's row, as
+## `column`'s does.
+pub fn row[$R](
+    gap: i32 = 0,
+    class: string = "",
+    children: fn() -> void $ Ui + R,
+) -> void $ Ui + R:
+    container("row", class, gap, children)
 
-## Static text.
-pub fn text(content: string) -> void $ Ui:
+## Static text, with an optional `class`.
+pub fn text(content: string, class: string = "") -> void $ Ui:
     parent := $.use(Ui).parent()
     node := create_node("text")
+    set_class(node, class)
     emit(.Append(parent, node))
     emit(.SetText(node, content))
+    mark_built(node)
 
 ## Text that follows the signals it reads. The block runs now and again
-## whenever one of them changes; equal text emits nothing.
+## whenever one of them changes; equal text emits nothing. It takes no
+## `class`, because the block is usually passed positionally and a
+## positional argument cannot skip a default; follow it with
+## `attr("class", ...)` instead.
 pub fn text_live[F < 'static & Fn() -> string $ Track](compute: F) -> void $ Ui:
     ui := $.use(Ui)
     owner := ui.owner()
     parent := ui.parent()
     node := create_node("text")
     emit(.Append(parent, node))
-    last := box(Last { text: "" })
-    first := box(Last { text: "yes" })
-    run := fn() -> bool $ Track + Mutate:
+    follow(owner, compute, fn(next: string) -> void: emit(.SetText(node, next)))
+    mark_built(node)
+
+# Runs `compute` now and whenever a signal it read changes, and calls
+# `write` with its value the first time and each time it differs.
+fn follow[F < 'static & Fn() -> string $ Track, W < 'static & Fn(string) -> void](
+    owner: OwnerId,
+    compute: F,
+    write: W,
+) -> void:
+    last := box(Last { text: "", first: true })
+    run := fn() -> bool $ Reactive:
         next := compute()
-        if first.text == "yes" || next != last.text:
-            first.text = ""
+        if last.first || next != last.text:
+            last.first = false
             last.text = next
-            emit(.SetText(node, next))
+            write(next)
         false
     computation := new_computation(
         Computation {
@@ -78,17 +125,33 @@ pub fn text_live[F < 'static & Fn() -> string $ Track](compute: F) -> void $ Ui:
     run_computation(computation)
 
 ## A button. The handler may write signals but not read them tracked; use
-## `peek` or `update`.
-pub fn button[F < 'static & FnMut() -> void $ Mutate](label: string, mut on_click: F) -> void $ Ui:
+## `peek` or `update`. `class` comes after the handler and is named:
+## `button("save", save, class="primary")`.
+pub fn button[F < 'static & FnMut() -> void $ Mutate](
+    label: string,
+    mut on_click: F,
+    class: string = "",
+) -> void $ Ui:
     ui := $.use(Ui)
     owner := ui.owner()
     parent := ui.parent()
     node := create_node("button")
+    set_class(node, class)
     emit(.Append(parent, node))
     emit(.SetText(node, label))
-    handler := register_handler(fn(payload: string) -> void $ Mutate: on_click())
-    emit(.Listen(node, "click", handler))
-    graph().owners[owner].cleanups.push(fn() -> void: drop_handler(handler))
+    listen(owner, node, "click", fn(payload: string) -> void $ Mutate: on_click())
+    mark_built(node)
+
+## Registers `handler` for `event` on `node` and drops it with `owner`.
+pub fn listen[F < 'static & FnMut(string) -> void $ Mutate](
+    owner: OwnerId,
+    node: NodeId,
+    event: string,
+    mut handler: F,
+) -> void:
+    id := register_handler(fn(payload: string) -> void $ Mutate: handler(payload))
+    emit(.Listen(node, event, id))
+    graph().owners[owner].cleanups.push(fn() -> void: drop_handler(id))
 
 ## Mounts `branch` while `when` is true and disposes it when it turns
 ## false. The branch keeps its place: it renders into a fragment node that
@@ -104,7 +167,7 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
     emit(.SetAttr(fragment, "class", "show"))
     emit(.Append(parent, fragment))
     shown := box(Shown { child: .None })
-    run := fn() -> bool $ Track + Mutate:
+    run := fn() -> bool $ Reactive:
         visible := when()
         match shown.child:
             .Some(child) =>
@@ -130,3 +193,35 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
         },
     )
     run_computation(computation)
+    mark_built(fragment)
+
+## The node the builder that finished last made: a `text` or `button`, or
+## a `column` or `row` once its block has run. For the few cases that need
+## to address a node later; builders return `void` so a component may end
+## with one.
+pub fn last_node() -> NodeId $ Ui:
+    rt.last_node()
+
+## Sets a static attribute on `last_node()`, so it follows the builder it
+## applies to:
+##
+## ```hd
+## use pkg.{Ui, attr, column, text}
+## fn view() -> void $ Ui:
+##     column:
+##         text("hi")
+##         attr("title", "greeting")
+##     attr("id", "main")
+## ```
+##
+## `style` is one attribute, a string.
+pub fn attr(name: string, value: string) -> void $ Ui:
+    emit(.SetAttr(last_node(), name, value))
+
+## An attribute of `last_node()` that follows the signals `compute` reads,
+## as `text_live` does for text: one `SetAttr` per change and none for an
+## equal value.
+pub fn attr_live[F < 'static & Fn() -> string $ Track](name: string, compute: F) -> void $ Ui:
+    owner := $.use(Ui).owner()
+    node := last_node()
+    follow(owner, compute, fn(next: string) -> void: emit(.SetAttr(node, name, next)))

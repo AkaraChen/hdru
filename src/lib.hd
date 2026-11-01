@@ -7,6 +7,7 @@ pub use pkg.keys.{
     HandlerId,
     Mutate,
     NoTrack,
+    NoWrites,
     NodeId,
     OwnerId,
     Scheduler,
@@ -14,14 +15,16 @@ pub use pkg.keys.{
     SourceId,
     Track,
     Ui,
+    WriteLog,
 }
 pub use pkg.graph.{dispose, flush}
-pub use pkg.reactive.{ReadSignal, Signal, batch, effect, memo, signal, sync, untrack}
+pub use pkg.reactive.{ReadSignal, Signal, assert_no_writes, batch, effect, memo, signal, sync, untrack}
 pub use pkg.owner.{current_owner, on_cleanup, owned, root}
 pub use pkg.surface.{DomCommand, Surface, UiEvent}
-pub use pkg.runtime.{dispatch, mount, reset_for_test, run_app, run_jobs, take_commands}
-pub use pkg.resource.{Resource, resource}
-pub use pkg.context.{provide, use_context}
-pub use pkg.builders.{button, column, row, show, text, text_live}
+pub use pkg.runtime.{dispatch, last_writes, mount, reset_for_test, run_app, run_jobs, take_commands}
+pub use pkg.resource.{Resource, resource, resource_with}
+pub use pkg.context.{Given, Provided, given, provide, use_context, use_given}
+pub use pkg.builders.{attr, attr_live, button, column, last_node, row, show, text, text_live}
 pub use pkg.collections.{for_each}
+pub use pkg.inputs.{checkbox, input, on}
 pub use pkg.recorder.{Recorder, scripted}

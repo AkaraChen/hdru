@@ -4,20 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>hd ui: counter</title>
-  <style>
-    body { font: 16px system-ui, sans-serif; margin: 2rem; }
-    .column { display: flex; flex-direction: column; }
-    .row { display: flex; flex-direction: row; }
-    .show, .list, .item { display: contents; }
-    button { font: inherit; padding: 0.25rem 0.75rem; }
-    #status { color: #666; margin-top: 2rem; font-size: 0.9rem; }
-  </style>
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body data-app="counter">
-  <h1>hd ui: counter</h1>
-  <p><a href="./todos.html">todos demo</a> · <a href="./fetcher.html">fetcher demo</a></p>
-  <div id="app"></div>
-  <p id="status">loading…</p>
+  <main>
+    <h1>hd ui: counter</h1>
+    <p><a href="./todos.html">todos demo</a> · <a href="./fetcher.html">fetcher demo</a></p>
+    <div id="app"></div>
+    <p id="status">loading…</p>
+  </main>
   <script type="module" src="./dist/main.js"></script>
 </body>
 </html>

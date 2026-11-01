@@ -1,0 +1,50 @@
+# The probe that established roadmap rule 4 (docs/roadmap.md, section 6),
+# kept as the first test of row-polymorphic builders. Its `Ui` is a
+# stand-in with a depth counter; the library's `Scope` takes its place.
+use std.testing.assert_equal
+# A test module that imports nothing from the package fails to build with
+# `invalid-manifest` for the `surface.Surface` host entry, so it imports one
+# item it does not use.
+use pkg.Surface
+
+trait Ui:
+    fn depth(self) -> i32
+
+trait Theme:
+    fn name(self) -> string
+
+struct Scope:
+    depth: i32
+
+impl Ui for Scope:
+    fn depth(self) -> i32: self.depth
+
+struct Dark: pass
+
+impl Theme for Dark:
+    fn name(self) -> string: "dark"
+
+fn column[$R](children: fn() -> void $ Ui + R) -> void $ Ui + R:
+    d := $.use(Ui).depth()
+    $.with(Ui=box(Scope { depth: d + 1 })):
+        children()
+
+fn themed[$R](body: fn() -> void $ R + Theme) -> void $ R:
+    $.with(Theme=box(Dark {})):
+        body()
+
+fn themed_text() -> string $ Ui + Theme:
+    "${$.use(Theme).name()} at ${$.use(Ui).depth()}"
+
+fn app() -> string $ Ui:
+    out := box([""])
+    themed:
+        column:
+            column:
+                out.push(themed_text())
+    out[1]
+
+it("row-polymorphic builders thread Theme through nested columns"):
+    out := $.with(Ui=box(Scope { depth: 0 })):
+        app()
+    assert_equal(out, "dark at 2", reason="Theme reached the leaf through two columns")

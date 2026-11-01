@@ -2,7 +2,8 @@
 
 Status: implementation plan, 2026-11-01; phases 0 to 7 were implemented
 the same day and phase 8 on 2026-11-02 (see `design.md` for what each
-phase actually became and the `Outcome` column below). The wasmtime
+phase actually became and the `Outcome` column below). Complete; the
+plan for phase 9 onward is `roadmap.md`. The wasmtime
 engine is out of scope for now: this `hd` build has none, and every gate
 runs on the Node engine. Derived from the review doc
 "A Solid-style reactive UI for hd: review and counter-proposal" (the

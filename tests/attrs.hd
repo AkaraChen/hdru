@@ -1,0 +1,104 @@
+use pkg.{
+    DomCommand,
+    Mutate,
+    UiEvent,
+    attr,
+    attr_live,
+    button,
+    column,
+    dispatch,
+    last_node,
+    mount,
+    reset_for_test,
+    row,
+    signal,
+    take_commands,
+    text,
+}
+use std.testing.assert_equal
+
+fn click(handler: usize) -> List[DomCommand]:
+    dispatch(UiEvent { handler: handler, payload: "" })
+    take_commands()
+
+it("column and row add class to their own"):
+    reset_for_test()
+    _ := mount:
+        column(class="card", gap=8):
+            row(class="toolbar"):
+                pass
+    assert_equal(
+        take_commands(),
+        [
+            .Create(1, "div"),
+            .SetAttr(1, "class", "column card"),
+            .SetAttr(1, "style", "gap:8px"),
+            .Append(0, 1),
+            .Create(2, "div"),
+            .SetAttr(2, "class", "row toolbar"),
+            .Append(1, 2),
+        ],
+        reason="the extra class follows the builder's own",
+    )
+
+it("text and button set class before they attach"):
+    reset_for_test()
+    _ := mount:
+        text("hi", class="lead")
+        button("go", fn() -> void $ Mutate: pass, class="primary")
+        text("plain")
+    assert_equal(
+        take_commands(),
+        [
+            .Create(1, "text"),
+            .SetAttr(1, "class", "lead"),
+            .Append(0, 1),
+            .SetText(1, "hi"),
+            .Create(2, "button"),
+            .SetAttr(2, "class", "primary"),
+            .Append(0, 2),
+            .SetText(2, "go"),
+            .Listen(2, "click", 1),
+            .Create(3, "text"),
+            .Append(0, 3),
+            .SetText(3, "plain"),
+        ],
+        reason="no class, no SetAttr",
+    )
+
+it("attr applies to the builder that finished last"):
+    reset_for_test()
+    seen := box([0])
+    _ := mount:
+        column:
+            text("a")
+            attr("title", "first")
+        attr("id", "main")
+        seen.push(last_node())
+    commands := take_commands()
+    assert_equal(commands.contains(.SetAttr(2, "title", "first")), true, reason="the text inside")
+    assert_equal(commands.contains(.SetAttr(1, "id", "main")), true, reason="the column, after its block")
+    assert_equal(seen[1], 1, reason="last_node names the column")
+
+it("attr_live emits one SetAttr per change and none for an equal value"):
+    reset_for_test()
+    _ := mount:
+        level := signal(+1)
+        text("meter")
+        attr_live(
+            "data-level",
+            fn():
+                if level.get() > 2: "high" else: "low"
+            ,
+        )
+        button(
+            "up",
+            fn():
+                level.update(fn(n): n + 1)
+            ,
+        )
+    commands := take_commands()
+    assert_equal(commands.contains(.SetAttr(1, "data-level", "low")), true, reason="the first value")
+    assert_equal(click(1), [], reason="2 is still low: no command")
+    assert_equal(click(1), [.SetAttr(1, "data-level", "high")], reason="3 is high: one SetAttr")
+    assert_equal(click(1), [], reason="4 is still high")

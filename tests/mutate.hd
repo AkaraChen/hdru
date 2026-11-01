@@ -1,0 +1,60 @@
+use pkg.{
+    SourceId,
+    UiEvent,
+    assert_no_writes,
+    button,
+    column,
+    dispatch,
+    last_writes,
+    mount,
+    reset_for_test,
+    root,
+    signal,
+    sync,
+    text_live,
+}
+use std.testing.assert_equal
+
+it("assert_no_writes lets reads through"):
+    _ := root:
+        count := signal(+1)
+        seen := assert_no_writes(fn(): count.peek() + 1)
+        assert_equal(seen, +2, reason="a read is fine")
+
+it("assert_no_writes panics on a write", expect_panic="explicit-panic"):
+    _ := root:
+        count := signal(+1)
+        assert_no_writes:
+            count.set(+2)
+
+it("dispatch records the sources a handler wrote, not those its effects wrote"):
+    reset_for_test()
+    ids := box([0])
+    _ := mount:
+        count := signal(+0)
+        other := signal(+0)
+        doubled := signal(+0)
+        ids.push(count.id())
+        ids.push(other.id())
+        ids.push(doubled.id())
+        sync:
+            doubled.set(count.get() * 2)
+        column:
+            text_live:
+                "Count: ${count.get()} / ${doubled.get()}"
+            button(
+                "both",
+                fn():
+                    other.update(fn(n): n + 1)
+                    count.update(fn(n): n + 1)
+                    other.update(fn(n): n + 1)
+                ,
+            )
+            button("nothing", fn(): count.set_if_changed(count.peek()))
+    dispatch(UiEvent { handler: 1, payload: "" })
+    let expected: List[SourceId] = [ids[2], ids[1]]
+    assert_equal(last_writes(), expected, reason="other, then count; doubled was the sync's write")
+    dispatch(UiEvent { handler: 2, payload: "" })
+    assert_equal(last_writes(), [], reason="an equal write is no write")
+    dispatch(UiEvent { handler: 99, payload: "" })
+    assert_equal(last_writes(), [], reason="no handler, no writes")

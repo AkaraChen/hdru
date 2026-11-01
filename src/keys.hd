@@ -13,6 +13,10 @@ pub type NodeId = usize
 ## An event handler the runtime registered. Handler 0 means "stop".
 pub type HandlerId = usize
 
+## The row every stored computation body runs under: it may read signals
+## tracked and write them.
+pub type Reactive = $ Track + Mutate
+
 ## Installed around every tracked computation. `depend` records one source
 ## the running computation read.
 pub trait Track:
@@ -53,6 +57,23 @@ pub struct Scheduler:
 impl Mutate for Scheduler:
     fn invalidate(&mut self, source: SourceId) -> void:
         self.writes += 1
+
+## A `Mutate` provider that records each source written, once, in order.
+## `dispatch` installs one around every handler.
+pub struct WriteLog:
+    pub sources: List[SourceId]
+
+impl Mutate for WriteLog:
+    fn invalidate(&mut self, source: SourceId) -> void:
+        if !self.sources.contains(source):
+            self.sources.push(source)
+
+## A `Mutate` provider that panics on any write, for `assert_no_writes`.
+pub struct NoWrites: pass
+
+impl Mutate for NoWrites:
+    fn invalidate(&mut self, source: SourceId) -> void:
+        panic("ui: signal $source was written inside assert_no_writes")
 
 ## The `Ui` provider: one owner and one parent node.
 pub struct Scope:

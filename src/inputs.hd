@@ -1,0 +1,107 @@
+## Input controls: each keeps a signal and a host control in step. The
+## user's edit arrives as an event payload and is written into the signal;
+## a write from elsewhere is sent to the control as a `SetAttr`, except the
+## value the control already shows, so a keystroke is never echoed back.
+use std.function.FnMut
+use pkg.keys.{Mutate, NodeId, OwnerId, Reactive, Track, Ui}
+use pkg.graph.{Computation, new_computation, run_computation}
+use pkg.reactive.Signal
+use pkg.runtime.{create_node, emit, last_node, mark_built}
+use pkg.builders.listen
+
+# What the control shows now: the last value sent to it or typed into it.
+struct Shown:
+    text: string
+
+## A text field bound to `value`. Typing writes the field's text into
+## `value` on each `input` event; writing `value` elsewhere, say clearing
+## it after a submit, updates the field.
+pub fn input(value: Signal[string], class: string = "") -> void $ Ui:
+    ui := $.use(Ui)
+    owner := ui.owner()
+    node := control(ui.parent(), "text", class)
+    initial := value.peek()
+    emit(.SetAttr(node, "value", initial))
+    shown := box(Shown { text: initial })
+    listen(
+        owner,
+        node,
+        "input",
+        fn(payload: string) -> void $ Mutate:
+            shown.text = payload
+            value.set_if_changed(payload)
+        ,
+    )
+    run := fn() -> bool $ Reactive:
+        next := value.get()
+        if next != shown.text:
+            shown.text = next
+            emit(.SetAttr(node, "value", next))
+        false
+    follow_effect(owner, run)
+    mark_built(node)
+
+## A checkbox bound to `checked`, over the `change` event, whose payload
+## the host sends as `"true"` or `"false"`.
+pub fn checkbox(checked: Signal[bool], class: string = "") -> void $ Ui:
+    ui := $.use(Ui)
+    owner := ui.owner()
+    node := control(ui.parent(), "checkbox", class)
+    initial := checked.peek()
+    emit(.SetAttr(node, "checked", "$initial"))
+    shown := box(Shown { text: "$initial" })
+    listen(
+        owner,
+        node,
+        "change",
+        fn(payload: string) -> void $ Mutate:
+            shown.text = payload
+            checked.set_if_changed(payload == "true")
+        ,
+    )
+    run := fn() -> bool $ Reactive:
+        next := "${checked.get()}"
+        if next != shown.text:
+            shown.text = next
+            emit(.SetAttr(node, "checked", next))
+        false
+    follow_effect(owner, run)
+    mark_built(node)
+
+## Calls `handler` with the event's payload whenever `event` fires on
+## `last_node()`. Besides the DOM's own event names, the provider sends
+## `"enter"` when Enter is pressed in a field, with the field's text as
+## the payload:
+##
+## ```hd
+## use pkg.{Mutate, Ui, input, on, signal}
+## fn search() -> void $ Ui:
+##     query := signal("")
+##     input(query)
+##     on("enter", fn(text: string) -> void $ Mutate: query.set(""))
+## ```
+pub fn on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Ui:
+    listen($.use(Ui).owner(), last_node(), event, fn(payload: string) -> void $ Mutate: handler(payload))
+
+fn control(parent: NodeId, kind: string, class: string) -> NodeId:
+    node := create_node("input")
+    emit(.SetAttr(node, "type", kind))
+    if class != "":
+        emit(.SetAttr(node, "class", class))
+    emit(.Append(parent, node))
+    node
+
+# Runs `run` as an effect of `owner`, now and after each change.
+fn follow_effect[F < 'static & FnMut() -> bool $ Reactive](owner: OwnerId, mut run: F) -> void:
+    erased := fn() -> bool $ Reactive: run()
+    computation := new_computation(
+        Computation {
+            run: erased,
+            kind: .Effect,
+            state: .Dirty,
+            deps: [],
+            owner: owner,
+            source: .None,
+        },
+    )
+    run_computation(computation)

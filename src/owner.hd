@@ -4,8 +4,9 @@ use pkg.keys.{Mutate, NoTrack, OwnerId, Scheduler, Scope, Track, Ui}
 use pkg.graph.{graph, new_owner}
 
 ## Runs `body` under a fresh root owner with all three keys installed, and
-## returns the owner so the caller can `dispose` it.
-pub fn root(body: fn() -> void $ Ui + Track + Mutate) -> OwnerId:
+## returns the owner so the caller can `dispose` it. Any other key `body`
+## names is the caller's to provide.
+pub fn root[$R](body: fn() -> void $ Ui + Track + Mutate + R) -> OwnerId $ R:
     owner := new_owner(.None)
     $.with(
         Ui=box(Scope { owner: owner, parent: 0 }),
@@ -18,8 +19,9 @@ pub fn root(body: fn() -> void $ Ui + Track + Mutate) -> OwnerId:
 ## Runs `body` under a child of the current owner, keeping the current
 ## parent node. This is a component boundary: what `body` creates or
 ## provides is disposed with the child, and `provide` inside it shadows
-## the outer value only for `body`.
-pub fn owned(body: fn() -> void $ Ui) -> void $ Ui:
+## the outer value only for `body`. Like `column`, it threads the caller's
+## other keys into `body`.
+pub fn owned[$R](body: fn() -> void $ Ui + R) -> void $ Ui + R:
     ui := $.use(Ui)
     owner := new_owner(.Some(ui.owner()))
     parent := ui.parent()

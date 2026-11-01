@@ -1,5 +1,7 @@
 use pkg.{
+    Provided,
     Signal,
+    Track,
     Ui,
     UiEvent,
     button,
@@ -14,6 +16,9 @@ use pkg.{
     text,
     text_live,
     use_context,
+    use_given,
+    given,
+    row,
 }
 use std.testing.assert_equal
 
@@ -94,3 +99,57 @@ it("a signal provided through context is shared state"):
         [.SetText(2, "Count: 1"), .SetText(4, "Count: 1")],
         reason="both readers see the write",
     )
+
+## A context key checked at compile time: a component that needs a theme
+## names `Palette` in its row.
+trait Palette:
+    fn name(self) -> string
+
+struct Dark: pass
+
+impl Palette for Dark:
+    fn name(self) -> string: "dark"
+
+## The extension form: installs `Palette` and passes every other key of
+## the caller through.
+fn themed[$R](theme: *mut Dark, body: fn() -> void $ R + Palette) -> void $ R:
+    $.with(Palette=theme):
+        body()
+
+fn palette_text() -> void $ Ui + Palette:
+    text("${$.use(Palette).name()} under ${parent_node()}")
+
+fn parent_node() -> usize $ Ui:
+    $.use(Ui).parent()
+
+it("a typed key reaches a component through two columns"):
+    reset_for_test()
+    _ := mount:
+        themed(box(Dark {})):
+            column:
+                row:
+                    palette_text()
+    commands := take_commands()
+    assert_equal(commands.contains(.SetText(3, "dark under 2")), true, reason="Palette under the row")
+
+fn titled() -> void $ Ui + Provided[Theme]:
+    theme := use_given::[Theme]()
+    column:
+        text(theme.name)
+        # A retained callback runs later under `Track + Mutate` only, so it
+        # captures the value lexically instead of naming the key.
+        # It reads no signal, so its row is written out (design.md, rule 1).
+        text_live(fn() -> string $ Track: "live ${theme.name}")
+
+it("given supplies a value through the generic Provided key"):
+    reset_for_test()
+    _ := mount:
+        given(Theme { name: "solar" }):
+            column:
+                titled()
+            given(Theme { name: "inner" }):
+                titled()
+    commands := take_commands()
+    assert_equal(commands.contains(.SetText(3, "solar")), true, reason="outer given")
+    assert_equal(commands.contains(.SetText(4, "live solar")), true, reason="captured lexically")
+    assert_equal(commands.contains(.SetText(6, "inner")), true, reason="a nearer given shadows")

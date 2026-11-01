@@ -1,0 +1,110 @@
+use pkg.{DomCommand, Resource, Surface, Ui, reset_for_test, resource_with, run_app, scripted, signal, text_live}
+use std.convert.From
+use std.task.{Backoff, TimedOut, retry, timeout, with_timeout}
+use std.time.{Clock, ManualClock, Timestamp, ms}
+use std.testing.assert_equal
+
+@derive(Eq, Debug)
+enum LoadError:
+    Flaky(attempt: usize)
+    Slow
+
+impl From[TimedOut] for LoadError:
+    fn from(value: TimedOut) -> LoadError:
+        .Slow
+
+struct Attempts:
+    count: usize
+
+fn describe(state: Resource[string, LoadError]) -> string:
+    match state:
+        .Loading => "loading"
+        .Ready(value) => "ready: $value"
+        .Failed(.Slow) => "failed: too slow"
+        .Failed(.Flaky(n)) => "failed: attempt $n"
+
+fn flaky_profile(attempts: *mut Attempts, succeed_on: usize) -> void $ Ui + Clock:
+    id := signal(+1)
+    user := resource_with(
+        fn(): id.get(),
+        fn!(key: i32) -> Result[string, LoadError]:
+            attempts.count += 1
+            if attempts.count < succeed_on: .Err(.Flaky(attempts.count)) else: .Ok("user $key")
+        ,
+        retry(Backoff { attempts: 3 }),
+    )
+    text_live:
+        describe(user.get())
+
+it("retry runs the loader again after a failure, waiting on the clock"):
+    reset_for_test()
+    attempts := box(Attempts { count: 0 })
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Surface=recorder):
+        run_app!(fn() -> void $ Ui + Clock: flaky_profile(attempts, 3))
+    assert_equal(attempts.count, 3, reason="two failures, then success")
+    assert_equal(clock.now().unix_milliseconds(), 300, reason="backoff waited 100ms, then 200ms")
+    assert_equal(recorder.log.get(3), .Some(DomCommand.SetText(1, "ready: user 1")), reason="landed")
+
+it("a loader that keeps failing lands its last error"):
+    reset_for_test()
+    attempts := box(Attempts { count: 0 })
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Surface=recorder):
+        run_app!(fn() -> void $ Ui + Clock: flaky_profile(attempts, 99))
+    assert_equal(attempts.count, 3, reason="three attempts, as the backoff says")
+    assert_equal(
+        recorder.log.get(3),
+        .Some(DomCommand.SetText(1, "failed: attempt 3")),
+        reason="the last error",
+    )
+
+fn slow_profile() -> void $ Ui + Clock:
+    let clock: *mut dyn Clock = $.use(Clock)
+    id := signal(+7)
+    user := resource_with(
+        fn(): id.get(),
+        fn!(key: i32) -> Result[string, LoadError]:
+            clock.sleep!(ms(2000))
+            .Ok("user $key")
+        ,
+        timeout(ms(20)),
+    )
+    text_live:
+        describe(user.get())
+
+it("a loader slower than its timeout lands as Failed"):
+    reset_for_test()
+    recorder := scripted([])
+    $.with(Surface=recorder):
+        run_app!(slow_profile)
+    assert_equal(
+        recorder.log.get(3),
+        .Some(DomCommand.SetText(1, "failed: too slow")),
+        reason="the deadline won",
+    )
+
+fn composed_profile(attempts: *mut Attempts) -> void $ Ui + Clock:
+    id := signal(+2)
+    user := resource_with(
+        fn(): id.get(),
+        fn!(key: i32) -> Result[string, LoadError]:
+            attempts.count += 1
+            if attempts.count < 2: .Err(.Flaky(attempts.count)) else: .Ok("user $key")
+        ,
+        with_timeout(ms(5000), retry(Backoff { attempts: 3 })),
+    )
+    text_live:
+        describe(user.get())
+
+it("policies compose: a deadline around a retry"):
+    reset_for_test()
+    attempts := box(Attempts { count: 0 })
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Surface=recorder):
+        run_app!(fn() -> void $ Ui + Clock: composed_profile(attempts))
+    assert_equal(attempts.count, 2, reason="one retry inside the deadline")
+    assert_equal(recorder.log.get(3), .Some(DomCommand.SetText(1, "ready: user 2")), reason="landed")

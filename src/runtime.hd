@@ -3,7 +3,7 @@
 ## one event to its handler and flushes.
 use std.function.FnMut
 use std.task.all
-use pkg.keys.{HandlerId, Mutate, NodeId, NoTrack, OwnerId, Scheduler, Scope, Track, Ui}
+use pkg.keys.{HandlerId, Mutate, NodeId, NoTrack, OwnerId, Scope, SourceId, Track, Ui, WriteLog}
 use pkg.graph.{flush, graph, new_owner}
 use pkg.reactive.batch
 use pkg.surface.{DomCommand, Surface, UiEvent}
@@ -23,6 +23,12 @@ pub struct Runtime:
     ## Ids registered since the loop last told the host about them.
     pub unposted: List[usize]
     pub next_job: usize
+    ## Workers started by `run_app!` and not yet stopped.
+    pub live_workers: usize
+    ## The node of the builder that finished last, for `attr`.
+    pub last_node: NodeId
+    ## The sources the last dispatched handler wrote.
+    pub last_writes: List[SourceId]
 
 RUNTIME := box(
     Runtime {
@@ -33,12 +39,11 @@ RUNTIME := box(
         jobs: {},
         unposted: [],
         next_job: 1,
+        live_workers: 0,
+        last_node: 0,
+        last_writes: [],
     },
 )
-
-# How many worker tasks `run_app!` runs beside the event loop, so at most
-# this many loads are in flight at once.
-WORKERS := 4
 
 pub fn runtime() -> *mut Runtime:
     RUNTIME
@@ -54,6 +59,14 @@ pub fn create_node(kind: string) -> NodeId:
     rt.next_node += 1
     emit(.Create(node, kind))
     node
+
+## Records `node` as the one the last builder made, for `attr`.
+pub fn mark_built(node: NodeId) -> void:
+    runtime().last_node = node
+
+## The node `mark_built` recorded last.
+pub fn last_node() -> NodeId:
+    runtime().last_node
 
 ## Registers a handler and returns its id.
 pub fn register_handler[F < 'static & FnMut(string) -> void $ Mutate](mut handler: F) -> HandlerId:
@@ -93,7 +106,18 @@ pub fn take_commands() -> List[DomCommand]:
 ## Builds `root` under a fresh owner, appending to node 0, and flushes.
 ## Returns the owner so the tree can be disposed. A root that needs other
 ## providers, say `$ Ui + Clock` to capture a clock for a loader, names
-## them in its row and `mount` requires them too.
+## them in its row and `mount` requires them too. So a context key that
+## no ancestor provides is a compile error, here a component that needs a
+## `Provided[string]` called from one whose row is `$ Ui`:
+##
+## ```hd
+## use pkg.{Provided, Ui, column, text, use_given}
+## fn title() -> void $ Ui + Provided[string]:
+##     text(use_given::[string]())
+## fn app() -> void $ Ui:
+##     column:  # error: missing-requirement
+##         title()
+## ```
 pub fn mount[$ R](root: fn() -> void $ Ui + R) -> OwnerId $ R:
     owner := new_owner(.None)
     $.with(Ui=box(Scope { owner: owner, parent: 0 }), Track=box(NoTrack {})):
@@ -101,16 +125,26 @@ pub fn mount[$ R](root: fn() -> void $ Ui + R) -> OwnerId $ R:
     flush()
     owner
 
-## Runs the handler of `event` inside a batch, then flushes.
+## Runs the handler of `event` inside a batch, then flushes. The sources
+## the handler wrote are kept for `last_writes`.
 pub fn dispatch(event: UiEvent) -> void:
     found := runtime().handlers.get(event.handler)
     match found:
         .Some(handler) =>
             payload := event.payload
-            $.with(Mutate=box(Scheduler { writes: 0 })):
+            log := box(WriteLog { sources: [] })
+            $.with(Mutate=log):
                 batch(fn() -> void $ Mutate: handler(payload))
-        .None => pass
+            runtime().last_writes = log.sources
+        .None => runtime().last_writes = []
     flush()
+
+## The sources the handler of the last `dispatch` wrote, in the order it
+## first wrote each, so a tool can show "this click wrote `count`" by
+## comparing with `count.id()`. Writes by effects the flush ran are not
+## the handler's and are not listed.
+pub fn last_writes() -> List[SourceId]:
+    runtime().last_writes
 
 ## Resets ids and clears the queues and the handler table. For tests that
 ## assert exact command lists.
@@ -123,7 +157,14 @@ pub fn reset_for_test() -> void:
     rt.jobs = {}
     rt.unposted = []
     rt.next_job = 1
+    rt.live_workers = 0
+    rt.last_node = 0
+    rt.last_writes = []
     g := graph()
+    g.sources = {}
+    g.computations = {}
+    g.owners = {}
+    g.next_id = 1
     g.effects = []
     g.flushing = false
     g.batch_depth = 0
@@ -170,11 +211,10 @@ fn event_loop!() -> void $ Surface:
             break
         dispatch(event)
         send!()
-    let count = 0
-    while count < WORKERS:
-        $.use(Surface).post_job(0)
-        count += 1
+    $.use(Surface).post_job(0)
 
+# A worker that takes the stop marker passes it on to the next one while
+# any is left, so the event loop posts one 0 however many workers run.
 fn worker!() -> void $ Surface:
     while true:
         id := $.use(Surface).next_job!()
@@ -182,9 +222,22 @@ fn worker!() -> void $ Surface:
             break
         run_job!(id)
         send!()
+    rt := runtime()
+    rt.live_workers -= 1
+    if rt.live_workers > 0:
+        $.use(Surface).post_job(0)
 
+# Counts a worker as live when its cold suspension is made, before any
+# task runs, so the stop marker knows how many to reach.
+fn started() -> mut Suspend[void] $ Surface:
+    runtime().live_workers += 1
+    worker()
+
+# The pool: four workers, so at most four loads are in flight at once.
+# The count is the number of arguments because `all!` has fixed arity and
+# no task can wait on another (hd-lang#1164), so the pool is not a loop.
 fn workers!() -> void $ Surface:
-    _ := all!(worker(), worker(), worker(), worker())
+    _ := all!(started(), started(), started(), started())
 
 ## Mounts `root`, sends its commands, then runs the event loop beside a
 ## pool of workers until the host sends handler 0: each event is

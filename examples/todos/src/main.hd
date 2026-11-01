@@ -1,12 +1,16 @@
 use dep.ui.{
+    Mutate,
     ReadSignal,
     Signal,
     Surface,
     Ui,
+    attr_live,
     button,
     column,
     for_each,
+    input,
     memo,
+    on,
     row,
     run_app,
     show,
@@ -27,6 +31,16 @@ fn toggle(id: usize, xs: List[Todo]) -> List[Todo]:
 fn without(id: usize, xs: List[Todo]) -> List[Todo]:
     xs.filter(fn(todo): todo.id != id)
 
+## Appends a todo titled `title` unless it is blank, and clears the draft.
+fn add(todos: Signal[List[Todo]], next_id: Signal[usize], draft: Signal[string], title: string) -> void $ Mutate:
+    trimmed := title.trim()
+    if trimmed == "":
+        return
+    id := next_id.peek()
+    next_id.set(id + 1)
+    todos.update(fn(xs): [xs..., Todo { id: id, title: trimmed, done: false }])
+    draft.set("")
+
 fn todo_row(todos: Signal[List[Todo]], todo: ReadSignal[Todo]) -> void $ Ui:
     row(gap=8):
         text_live:
@@ -34,6 +48,12 @@ fn todo_row(todos: Signal[List[Todo]], todo: ReadSignal[Todo]) -> void $ Ui:
                 "[x] ${todo.get().title}"
             else:
                 "[ ] ${todo.get().title}"
+        attr_live(
+            "class",
+            fn():
+                if todo.get().done: "grow done" else: "grow"
+            ,
+        )
         button(
             "toggle",
             fn():
@@ -55,21 +75,28 @@ fn app() -> void $ Ui:
             Todo { id: 3, title: "ship a browser demo", done: false },
         ],
     )
-    next_id := signal(4)
+    next_id := signal::[usize](4)
+    draft := signal("")
     remaining := memo:
         todos.get().filter(fn(todo): !todo.done).len()
-    column(gap=8):
+    column(class="card", gap=8):
         text_live:
             "${remaining.get()} left"
         for_each(todos.read(), fn(todo): todo.id, fn(todo): todo_row(todos, todo))
         row(gap=8):
+            input(draft, class="grow")
+            on(
+                "enter",
+                fn(title: string) -> void $ Mutate:
+                    add(todos, next_id, draft, title)
+                ,
+            )
             button(
                 "add",
                 fn():
-                    id := next_id.peek()
-                    next_id.set(id + 1)
-                    todos.update(fn(xs): [xs..., Todo { id: id, title: "todo $id", done: false }])
+                    add(todos, next_id, draft, draft.peek())
                 ,
+                class="primary",
             )
             button(
                 "reverse",
@@ -78,7 +105,7 @@ fn app() -> void $ Ui:
                 ,
             )
         show(fn(): remaining.get() == 0):
-            text("all done")
+            text("all done", class="muted")
 
 pub fn main!() -> void $ Surface:
     run_app!(app)

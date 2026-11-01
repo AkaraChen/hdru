@@ -1,10 +1,11 @@
-use dep.ui.{Surface, Ui, button, column, row, run_app, signal, text_live}
+use dep.ui.{Surface, Ui, attr, button, column, row, run_app, signal, text_live}
 
 fn counter() -> void $ Ui:
     count := signal(+0)
-    column(gap=8):
+    column(class="card", gap=8):
         text_live:
             "Count: ${count.get()}"
+        attr("class", "title")
         row(gap=4):
             button(
                 "-",

@@ -15,6 +15,9 @@ use pkg.{
 }
 use std.testing.assert_equal
 
+struct Counter:
+    runs: usize
+
 @derive(Eq, Debug)
 struct Todo:
     id: usize
@@ -102,3 +105,32 @@ it("rows keep identity across updates and emit only what changed"):
         reason="prepend: one new row, then one move to the front",
     )
     assert_equal(click(1), [], reason="rename again: title already A")
+
+it("an unrelated list change reruns nothing inside a retained row"):
+    reset_for_test()
+    renders := box(Counter { runs: 0 })
+    _ := mount:
+        todos := signal([Todo { id: 1, title: "a" }, Todo { id: 2, title: "b" }])
+        button("rename", fn(): todos.update(rename))
+        for_each(
+            todos.read(),
+            fn(todo): todo.id,
+            fn(todo):
+                text_live(
+                    fn():
+                        renders.runs += 1
+                        todo.get().title
+                    ,
+                )
+            ,
+        )
+    _ := take_commands()
+    assert_equal(renders.runs, 2, reason="one run per row at mount")
+    assert_equal(click(1), [.SetText(4, "A")], reason="only row 1 changed")
+    assert_equal(renders.runs, 3, reason="row 2 kept its item, so its text did not rerun")
+
+it("two items with one key panic", expect_panic="explicit-panic"):
+    reset_for_test()
+    _ := mount:
+        todos := signal([Todo { id: 1, title: "a" }, Todo { id: 1, title: "b" }])
+        for_each(todos.read(), fn(todo): todo.id, fn(todo): text_live(fn(): todo.get().title))

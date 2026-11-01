@@ -1,6 +1,6 @@
 ## Signals, memos and effects.
 use std.function.{Fn, FnMut}
-use pkg.keys.{Collector, ComputationId, Mutate, NoTrack, SourceId, Track, Ui}
+use pkg.keys.{Collector, ComputationId, Mutate, NoTrack, NoWrites, Reactive, SourceId, Track, Ui}
 use pkg.graph.{
     Computation,
     ensure_fresh,
@@ -69,6 +69,14 @@ impl[T < 'static] Signal[T]:
     pub fn id(self) -> SourceId:
         self.slot.id
 
+impl[T < 'static & Eq] Signal[T]:
+    ## Writes `value` only when it differs from the current value, so an
+    ## equal write marks no observer and runs no effect. `set` stays
+    ## unconditional because `Signal[T]` does not require `Eq`.
+    pub fn set_if_changed(self, value: T) -> void $ Mutate:
+        if value != self.slot.value:
+            self.set(value)
+
 impl[T < 'static] ReadSignal[T]:
     ## Reads the value and records the dependency. A memo is brought up to
     ## date first.
@@ -108,7 +116,7 @@ pub fn memo[T < 'static & Eq, F < 'static & Fn() -> T $ Track](compute: F) -> Re
     first := $.with(Track=collector):
         compute()
     slot := box(Slot { value: first, id: source })
-    run := fn() -> bool $ Track + Mutate:
+    run := fn() -> bool $ Reactive:
         next := compute()
         if next == slot.value:
             false
@@ -132,7 +140,7 @@ pub fn memo[T < 'static & Eq, F < 'static & Fn() -> T $ Track](compute: F) -> Re
 ## read changes. The block only reads; use `sync` for one that also writes.
 pub fn effect[F < 'static & FnMut() -> void $ Track](mut run: F) -> void $ Ui:
     owner := $.use(Ui).owner()
-    erased := fn() -> bool $ Track + Mutate:
+    erased := fn() -> bool $ Reactive:
         run()
         false
     computation := new_computation(
@@ -151,7 +159,7 @@ pub fn effect[F < 'static & FnMut() -> void $ Track](mut run: F) -> void $ Ui:
 ## others. Writes inside it are batched until the current flush ends.
 pub fn sync[F < 'static & FnMut() -> void $ Track + Mutate](mut run: F) -> void $ Ui:
     owner := $.use(Ui).owner()
-    erased := fn() -> bool $ Track + Mutate:
+    erased := fn() -> bool $ Reactive:
         run()
         false
     computation := new_computation(
@@ -178,4 +186,11 @@ pub fn batch(body: fn() -> void $ Mutate) -> void $ Mutate:
 ## Runs `body` without recording any dependency it reads.
 pub fn untrack[T](body: fn() -> T $ Track) -> T:
     $.with(Track=box(NoTrack {})):
+        body()
+
+## Runs `body` with every signal write a panic, for tests that check a
+## block is read-only at run time. Effects that a flush runs have their
+## own `Mutate` and are not checked; only the body's own writes are.
+pub fn assert_no_writes[T, $R](body: fn() -> T $ Mutate + R) -> T $ R:
+    $.with(Mutate=box(NoWrites {})):
         body()

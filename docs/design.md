@@ -275,3 +275,169 @@ workers in `run_app!`, `examples/fetcher`.
   suspension another task awaits cancels that task
   (`req.cancel.await`), which would kill the worker, so the result is
   dropped at landing instead. The pool size is fixed at four.
+
+## Phase 9: hygiene (2026-11-02)
+
+The review fixes of `roadmap.md` phase 9. Gate: `hd test` green (33 at the
+end of the phase) plus `node --test providers/dom.test.mjs`.
+
+- **`set_if_changed`.** A second impl block, `impl[T < 'static & Eq]
+  Signal[T]`, is accepted, so the comparing write is a method beside `set`
+  rather than a change to `set`, which stays unconditional for types
+  without `Eq`. `for_each` now requires `T < Eq` and writes a retained row
+  with it, so an unrelated list change reruns nothing inside that row
+  (`tests/for_each.hd` counts the row's runs). Method doc tests are not
+  collected by `hd test`, only item-level ones, so the example lives in
+  `tests/core.hd`.
+- **Provider maps.** `Remove` and `Clear` in both trees of
+  `providers/dom.mjs` now forget every runtime node under the removed or
+  cleared subtree (`[data-hd]` descendants in the DOM, a recursive walk in
+  the scripted tree). The factories are exported and take the map as an
+  optional argument, so `providers/dom.test.mjs` checks with a minimal fake
+  DOM that a `show` toggled 100 times leaves the map at its mount size; the
+  test fails on the old provider. No method was added to the provider
+  object, because the glue checks it against the trait's schema.
+- **Duplicate keys** in `for_each` panic with `ui: for_each: duplicate key
+  <debug of key>`; `K` gained a `Debug` bound for that.
+- **One worker count.** The pool is still `all!(started(), started(),
+  started(), started())`, fixed arity (#1164), but the number appears
+  once: `started()` counts a worker live when its cold suspension is made,
+  before any task runs, and a worker that takes the stop marker re-posts it
+  while others are live. The event loop posts one 0.
+- **`reset_for_test`** also clears sources, computations and owners, and
+  resets the id counter. `text_live`'s first-run flag is a `bool`.
+- **`type Reactive = $ Track + Mutate`** (`req.row.alias`) names the row of
+  every stored computation body.
+
+## Phase 10: row-polymorphic builders and typed context (2026-11-02)
+
+- `column`, `row`, `owned` take `[$R]` with row `$ Ui + R`, and `root`
+  `$ Ui + Track + Mutate + R` returning `OwnerId $ R`. Nothing else
+  changed: every existing caller infers `R` as empty. A component with
+  `$ Ui + Palette` reads `$.use(Palette)` inside nested blocks, and the
+  extension form `fn themed[$R](theme, body: fn() -> void $ R + Palette)
+  -> void $ R` provides it (`tests/context.hd`). `tests/rows.hd` is the
+  probe of `roadmap.md` section 6, unchanged.
+- **The phase guarantee is now per row.** An eager `count.get()` in a
+  `column:` block makes the block's row `$ Ui + Track`, so `R = Track`,
+  which a component of row `$ Ui` does not have: `missing-requirement` at
+  the `column` call (the doc test on `column`; the code was
+  `unsatisfied-trait-bound` before). A component that names `Track` itself
+  may read eagerly, which is an honest untracked read.
+- **`Provided[T]`**, one generic key for one-off values:
+  `given(value): body` installs `Given { value }` as `Provided[T]` and
+  passes the caller's row through; `use_given::[T]()` reads it. No
+  `generic-requirement-key-collision` arose: `R` is a row variable, not a
+  key expression. A missing `given` is `missing-requirement` (doc test on
+  `mount`).
+- **The rule for retained callbacks.** `text_live`, `show`'s branch,
+  `for_each`'s render, handlers and loaders run later under `Track +
+  Mutate` or less and cannot carry `R`. Static context is a key in the
+  row; a value a re-running computation needs is captured lexically
+  (`theme := use_given::[Theme]()` before the block) or fetched through
+  the owner tree with `provide` / `use_context`, which stay for that case.
+- `examples/fetcher` moved the clock and the resource into a
+  `profile(id) $ Ui + Clock` component called inside `app`'s `column:`.
+  The roadmap said to move `$.use(Clock)` into the buttons' `row:`, but
+  the clock feeds the loader, not the buttons; the component shows the
+  same thing.
+- Three hd facts found on the way, none filed yet:
+  - A test module that imports nothing from the package fails to build
+    with `invalid-manifest` for the `surface.Surface` host entry, and a
+    doc test whose module does not reach `surface.hd` fails the same way.
+    `tests/rows.hd` imports `pkg.Surface` unused; the compile-fail doc
+    test lives on `mount` in `runtime.hd`.
+  - A doc test body cannot declare a `struct` (`unsupported: statement
+    DataDecl`), so that doc test uses `Provided[string]`.
+  - A private function with no row written has its row inferred, so a
+    compile-fail example must make the outer function's row explicit
+    (`fn app() -> void $ Ui`) or the error never appears.
+
+## Superseded: attributes and styles (2026-11-02, old phase 11)
+
+Built under the first numbering of `roadmap.md`, where phase 11 was
+"attributes and styles". The renumbered roadmap replaces it with phase 12,
+the renderer protocol and typed style (`rendering.md`), which removes the
+`class` and `style` strings and `SetAttr` below. Kept as the record of
+what existed until then.
+
+- `class: string = ""` is a named parameter of `column`, `row`, `text` and
+  `button`. Containers emit `class="column card"`; `text` and `button`
+  emit a `class` attribute only when one is given, between `Create` and
+  `Append`, so every earlier command list is unchanged. `button`'s `class`
+  comes after the handler (`button("save", save, class="primary")`)
+  because a positional argument cannot skip a default. `text_live` has no
+  `class` for the same reason: its block is usually positional.
+- **Builders still return `void`.** The roadmap wanted them to return
+  their `NodeId`, but a function's final expression must match its result
+  type, so every component ending in `text(...)` would fail with
+  `type-mismatch`. Instead the runtime records the node of the builder
+  that finished last (a container after its block has run), `last_node()`
+  returns it, and `attr(name, value)` and `attr_live(name, compute)` apply
+  to it. `attr_live` shares `text_live`'s computation through a private
+  `follow`: one `SetAttr` per change, none for an equal value.
+- `web/style.css` is one stylesheet for the three pages, keyed on
+  `.column`, `.row`, `.card` and a few app classes, with a dark variant.
+
+## Phase 13: input controls (2026-11-02)
+
+`src/inputs.hd`, `tests/inputs.hd`.
+
+- `input(value: Signal[string], class="")` emits `Create(input)`,
+  `type=text`, the initial `value`, and `Listen(node, "input", h)`. The
+  handler records the payload as what the field shows and writes it with
+  `set_if_changed`; an effect sends `SetAttr(value)` only when the signal
+  differs from what the field shows, so a keystroke is never echoed and a
+  write from elsewhere (clearing after a submit) is.
+  `checkbox(checked: Signal[bool])` is the same over `change`, with
+  payload `"true"`/`"false"`.
+- `on(event, handler)` listens on `last_node()`. The provider synthesizes
+  `"enter"` (a keydown filtered on Enter, payload the field's text), which
+  is what "Enter-or-button add" needed without `on_key`. `button` and
+  `on` share `listen(owner, node, event, handler)`.
+- Provider: `SetAttr` of `value` or `checked` sets the DOM property, the
+  only thing a field shows once edited; a checkbox's payload is its
+  `checked`. `UI_CLICKS` items may carry a payload, `4=milk`.
+- `examples/todos` gained the field, an `add` button and Enter, both
+  through one `add` that ignores a blank title and clears the draft.
+  Verified in a real browser: typing "buy milk" and Enter adds a row and
+  clears the field; typing and clicking `add` does the same.
+
+## Phase 14: resource policies (2026-11-02)
+
+`resource_with(key, load, policy)` in `src/resource.hd`,
+`tests/policy.hd`.
+
+- **A separate function, not a default argument.** Every `std.task`
+  layer wraps `fn!() -> Result[T, E] $ R` into one of row `$ R + Clock`,
+  and `timeout` also needs `E < From[TimedOut]`. A default
+  `policy=timeout(ms(5000))` on `resource` would put both on every
+  resource, including ones with `E = string`. So `resource` is unchanged
+  and `resource_with` takes `P < Layer[fn!() -> Result[T, E], Wrapped =
+  fn!() -> Result[T, E] $ Clock]`, has row `$ Ui + Clock`, captures the
+  clock at creation and installs it around `apply!(policy, work)` on the
+  worker. Compositions such as `with_timeout(ms(5000), retry(...))` fit
+  the same bound.
+- `resource` and `resource_with` share `follow_key` (generation, stale-job
+  drop, cleanup) and `settle` (the landing).
+- **The timeout test uses a real clock.** On a `ManualClock` every sleep
+  completes at once and work is polled first (`std-task` timeout example),
+  so a sleeping loader always beats the deadline. `hd.toml` now grants
+  `Clock` under `[dev-capabilities]`; the test's loader sleeps 2s against a
+  20ms timeout and lands `Failed(.Slow)` in well under a second. The retry
+  and composition tests use `ManualClock`, whose time shows the backoff
+  (100ms, then 200ms).
+
+## Phase 15: `Mutate` uses (2026-11-02)
+
+- `assert_no_writes[T, $R](body)` installs `NoWrites`, whose `invalidate`
+  panics. It checks only the body's own writes: effects a flush runs have
+  their own `Mutate` from `run_computation`.
+- `dispatch` installs a `WriteLog` instead of a throwaway `Scheduler`, and
+  `last_writes()` returns the sources the handler wrote, each once, in
+  first-write order. A `sync`'s writes during the flush are not listed.
+- **Decision: `Mutate` is a capability token and an observation hook; the
+  graph owns scheduling.** `batch_depth` stays on the graph. Moving it
+  into the provider would not let the provider flush, because a flush runs
+  effects and no provider method may run user code (phase 1), so the
+  provider would only hold a counter the graph reads.

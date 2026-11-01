@@ -2,7 +2,9 @@
 ## key changes. The loader runs on one of `run_app!`'s workers, so the
 ## event loop keeps serving clicks while it waits.
 use std.function.Fn
-use pkg.keys.{Mutate, Track, Ui}
+use std.task.{Layer, apply}
+use std.time.Clock
+use pkg.keys.{Mutate, OwnerId, Reactive, Track, Ui}
 use pkg.graph.{Computation, graph, new_computation, run_computation}
 use pkg.reactive.{ReadSignal, Signal, signal}
 use pkg.runtime.{drop_job, register_job}
@@ -25,7 +27,15 @@ fn land![T < 'static, E < 'static](
     pending: mut Suspend[Result[T, E]],
     state: Signal[Resource[T, E]],
 ) -> void $ Mutate:
-    result := pending!()
+    settle(mine, generation, pending!(), state)
+
+# Writes a load's result, unless the key moved on or the owner went away.
+fn settle[T < 'static, E < 'static](
+    mine: usize,
+    generation: *mut Generation,
+    result: Result[T, E],
+    state: Signal[Resource[T, E]],
+) -> void $ Mutate:
     if generation.current != mine:
         return
     generation.queued = .None
@@ -33,25 +43,24 @@ fn land![T < 'static, E < 'static](
         .Ok(value) => state.set(.Ready(value))
         .Err(error) => state.set(.Failed(error))
 
-## A value that follows `key`: whenever a signal `key` reads changes, the
-## resource goes back to `Loading` and `load(key())` runs on a worker; its
-## result lands as `Ready` or `Failed`. A result that arrives after the
-## key moved on, or after the owner was disposed, is dropped.
-##
-## `load` has the empty row: a loader that needs a provider captures it
-## before the call, as `http := $.use(Http)` then
-## `fn!(id: i32) -> Result[User, HttpError]: http.get!(...)`.
-pub fn resource[
+# Reloads whenever a signal `key` reads changes: each run bumps the
+# generation, drops the job still queued for the old key, goes back to
+# `Loading`, and registers `job(key, generation)`. Disposing `owner` drops
+# the queued job and turns any landing into a no-op.
+fn follow_key[
     K < 'static,
     T < 'static,
     E < 'static,
     KF < 'static & Fn() -> K $ Track,
-    L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
-](key: KF, load: L) -> ReadSignal[Resource[T, E]] $ Ui:
-    owner := $.use(Ui).owner()
-    state := signal::[Resource[T, E]](.Loading)
-    generation := box(Generation { current: 0, queued: .None })
-    run := fn() -> bool $ Track + Mutate:
+    J < 'static & Fn(K, usize) -> mut Suspend[void] $ Mutate,
+](
+    owner: OwnerId,
+    generation: *mut Generation,
+    state: Signal[Resource[T, E]],
+    key: KF,
+    job: J,
+) -> void:
+    run := fn() -> bool $ Reactive:
         k := key()
         generation.current += 1
         mine := generation.current
@@ -59,7 +68,7 @@ pub fn resource[
             .Some(stale) => drop_job(stale)
             .None => pass
         state.set(.Loading)
-        id := register_job(land(mine, generation, load(k), state))
+        id := register_job(job(k, mine))
         generation.queued = .Some(id)
         false
     computation := new_computation(
@@ -83,4 +92,77 @@ pub fn resource[
                     .None => pass
             ,
         )
+
+## A value that follows `key`: whenever a signal `key` reads changes, the
+## resource goes back to `Loading` and `load(key())` runs on a worker; its
+## result lands as `Ready` or `Failed`. A result that arrives after the
+## key moved on, or after the owner was disposed, is dropped.
+##
+## `load` has the empty row: a loader that needs a provider captures it
+## before the call, as `http := $.use(Http)` then
+## `fn!(id: i32) -> Result[User, HttpError]: http.get!(...)`.
+pub fn resource[
+    K < 'static,
+    T < 'static,
+    E < 'static,
+    KF < 'static & Fn() -> K $ Track,
+    L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
+](key: KF, load: L) -> ReadSignal[Resource[T, E]] $ Ui:
+    owner := $.use(Ui).owner()
+    state := signal::[Resource[T, E]](.Loading)
+    generation := box(Generation { current: 0, queued: .None })
+    follow_key(
+        owner,
+        generation,
+        state,
+        key,
+        fn(k: K, mine: usize) -> mut Suspend[void] $ Mutate: land(mine, generation, load(k), state),
+    )
+    state.read()
+
+fn land_with![T < 'static, E < 'static, P < Layer[fn!() -> Result[T, E], Wrapped = fn!() -> Result[T, E] $ Clock]](
+    mine: usize,
+    generation: *mut Generation,
+    clock: *mut dyn Clock,
+    policy: P,
+    work: fn!() -> Result[T, E],
+    state: Signal[Resource[T, E]],
+) -> void $ Mutate:
+    result := $.with(Clock=clock):
+        apply!(policy, work)
+    settle(mine, generation, result, state)
+
+## `resource` with a `std.task` policy around each load: `timeout`,
+## `retry`, `hedge`, `fallback`, or a composition such as
+## `with_timeout(ms(5000), retry(Backoff {}))`.
+##
+## Every policy layer adds `Clock` to the loader's row, so the resource
+## needs one: it takes the caller's clock now and installs it around each
+## policed load on the worker. A `timeout` also needs `E < From[TimedOut]`,
+## the error type a deadline converts into. A load the policy gives up on
+## lands as `Failed` with the policy's error.
+pub fn resource_with[
+    K < 'static,
+    T < 'static,
+    E < 'static,
+    KF < 'static & Fn() -> K $ Track,
+    L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
+    P < 'static & Layer[fn!() -> Result[T, E], Wrapped = fn!() -> Result[T, E] $ Clock],
+](key: KF, load: L, policy: P) -> ReadSignal[Resource[T, E]] $ Ui + Clock:
+    owner := $.use(Ui).owner()
+    let clock: *mut dyn Clock = $.use(Clock)
+    state := signal::[Resource[T, E]](.Loading)
+    generation := box(Generation { current: 0, queued: .None })
+    follow_key(
+        owner,
+        generation,
+        state,
+        key,
+        fn(k: K, mine: usize) -> mut Suspend[void] $ Mutate:
+            work := fn!() -> Result[T, E]:
+                let mut pending = load(k)
+                pending!()
+            land_with(mine, generation, clock, policy, work, state)
+        ,
+    )
     state.read()

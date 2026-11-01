@@ -2,7 +2,7 @@
 ## computation and owner. Nothing here calls user code while holding a
 ## reference into the graph; every walk copies its list out first.
 use std.inspect.Inspectable
-use pkg.keys.{Collector, ComputationId, Mutate, OwnerId, Scheduler, SourceId, Track}
+use pkg.keys.{Collector, ComputationId, Mutate, Reactive, OwnerId, Scheduler, SourceId, Track}
 
 @derive(Eq)
 pub enum State:
@@ -17,7 +17,7 @@ pub enum Kind:
 
 pub struct Computation:
     ## Recomputes; returns true when a memo's value changed.
-    pub run: fn() -> bool $ Track + Mutate
+    pub run: fn() -> bool $ Reactive
     pub kind: Kind
     pub state: State
     ## Each source read by the last run, with the version seen then.
