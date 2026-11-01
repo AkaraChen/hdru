@@ -1,0 +1,393 @@
+## The portable style vocabulary (`rendering.md`, layer 3): a flexbox
+## subset every renderer can implement, typed in hd and lowered to
+## `SetProp` commands. `Style` has one optional field per property key; an
+## unset field is `.None`, so one value serves as "the whole style of this
+## node" and as "only these keys".
+##
+## ```hd
+## use pkg.{Style, Ui, column, rgb, text}
+## fn card() -> void $ Ui:
+##     column(style=Style::empty().gap(8.0).padding(12.0).bg(rgb(255, 255, 255))):
+##         text("hello", style=Style::empty().font_size(18.0))
+## ```
+use pkg.protocol.{Color, PropValue, Size}
+
+## The main axis of a box: `column` (the default) or `row`.
+@derive(Eq, Debug)
+pub enum Direction:
+    Row
+    Column
+
+## Where a box puts its children along the main axis.
+@derive(Eq, Debug)
+pub enum Justify:
+    Start
+    Center
+    End
+    Between
+    Around
+
+## Where a box puts its children across the main axis.
+@derive(Eq, Debug)
+pub enum Align:
+    Start
+    Center
+    End
+    Stretch
+
+@derive(Eq, Debug)
+pub enum Overflow:
+    Visible
+    Hidden
+    Scroll
+
+@derive(Eq, Debug)
+pub enum Cursor:
+    Default
+    Pointer
+    Text
+
+## A style: every field optional, one per property key, in the order the
+## keys are lowered. Build one with `Style::empty()` and the chain methods.
+@derive(Eq, Debug)
+pub struct Style:
+    pub direction: Direction?
+    pub wrap: bool?
+    pub justify: Justify?
+    pub align: Align?
+    pub gap: f32?
+    pub grow: f32?
+    pub shrink: f32?
+    pub width: Size?
+    pub height: Size?
+    pub min_width: Size?
+    pub min_height: Size?
+    pub max_width: Size?
+    pub max_height: Size?
+    pub padding_top: f32?
+    pub padding_right: f32?
+    pub padding_bottom: f32?
+    pub padding_left: f32?
+    pub margin_top: f32?
+    pub margin_right: f32?
+    pub margin_bottom: f32?
+    pub margin_left: f32?
+    pub border_width: f32?
+    pub border_color: Color?
+    pub radius: f32?
+    pub background: Color?
+    pub opacity: f32?
+    pub overflow: Overflow?
+    pub cursor: Cursor?
+    pub color: Color?
+    pub font_size: f32?
+    pub font_weight: f32?
+    pub font_family: string?
+    pub disabled: bool?
+    pub dom_class: string?
+
+impl Style:
+    ## A style with no field set.
+    pub fn empty() -> Style:
+        Style {
+            direction: .None,
+            wrap: .None,
+            justify: .None,
+            align: .None,
+            gap: .None,
+            grow: .None,
+            shrink: .None,
+            width: .None,
+            height: .None,
+            min_width: .None,
+            min_height: .None,
+            max_width: .None,
+            max_height: .None,
+            padding_top: .None,
+            padding_right: .None,
+            padding_bottom: .None,
+            padding_left: .None,
+            margin_top: .None,
+            margin_right: .None,
+            margin_bottom: .None,
+            margin_left: .None,
+            border_width: .None,
+            border_color: .None,
+            radius: .None,
+            background: .None,
+            opacity: .None,
+            overflow: .None,
+            cursor: .None,
+            color: .None,
+            font_size: .None,
+            font_weight: .None,
+            font_family: .None,
+            disabled: .None,
+            dom_class: .None,
+        }
+
+    pub fn direction(self, value: Direction) -> Style:
+        Style { ...self, direction: .Some(value) }
+
+    pub fn wrap(self, value: bool) -> Style:
+        Style { ...self, wrap: .Some(value) }
+
+    pub fn justify(self, value: Justify) -> Style:
+        Style { ...self, justify: .Some(value) }
+
+    pub fn align(self, value: Align) -> Style:
+        Style { ...self, align: .Some(value) }
+
+    pub fn gap(self, value: f32) -> Style:
+        Style { ...self, gap: .Some(value) }
+
+    pub fn grow(self, value: f32) -> Style:
+        Style { ...self, grow: .Some(value) }
+
+    pub fn shrink(self, value: f32) -> Style:
+        Style { ...self, shrink: .Some(value) }
+
+    pub fn width(self, value: Size) -> Style:
+        Style { ...self, width: .Some(value) }
+
+    pub fn height(self, value: Size) -> Style:
+        Style { ...self, height: .Some(value) }
+
+    pub fn min_width(self, value: Size) -> Style:
+        Style { ...self, min_width: .Some(value) }
+
+    pub fn min_height(self, value: Size) -> Style:
+        Style { ...self, min_height: .Some(value) }
+
+    pub fn max_width(self, value: Size) -> Style:
+        Style { ...self, max_width: .Some(value) }
+
+    pub fn max_height(self, value: Size) -> Style:
+        Style { ...self, max_height: .Some(value) }
+
+    pub fn padding_top(self, value: f32) -> Style:
+        Style { ...self, padding_top: .Some(value) }
+
+    pub fn padding_right(self, value: f32) -> Style:
+        Style { ...self, padding_right: .Some(value) }
+
+    pub fn padding_bottom(self, value: f32) -> Style:
+        Style { ...self, padding_bottom: .Some(value) }
+
+    pub fn padding_left(self, value: f32) -> Style:
+        Style { ...self, padding_left: .Some(value) }
+
+    pub fn margin_top(self, value: f32) -> Style:
+        Style { ...self, margin_top: .Some(value) }
+
+    pub fn margin_right(self, value: f32) -> Style:
+        Style { ...self, margin_right: .Some(value) }
+
+    pub fn margin_bottom(self, value: f32) -> Style:
+        Style { ...self, margin_bottom: .Some(value) }
+
+    pub fn margin_left(self, value: f32) -> Style:
+        Style { ...self, margin_left: .Some(value) }
+
+    pub fn border_width(self, value: f32) -> Style:
+        Style { ...self, border_width: .Some(value) }
+
+    pub fn border_color(self, value: Color) -> Style:
+        Style { ...self, border_color: .Some(value) }
+
+    pub fn radius(self, value: f32) -> Style:
+        Style { ...self, radius: .Some(value) }
+
+    pub fn bg(self, value: Color) -> Style:
+        Style { ...self, background: .Some(value) }
+
+    pub fn opacity(self, value: f32) -> Style:
+        Style { ...self, opacity: .Some(value) }
+
+    pub fn overflow(self, value: Overflow) -> Style:
+        Style { ...self, overflow: .Some(value) }
+
+    pub fn cursor(self, value: Cursor) -> Style:
+        Style { ...self, cursor: .Some(value) }
+
+    pub fn color(self, value: Color) -> Style:
+        Style { ...self, color: .Some(value) }
+
+    pub fn font_size(self, value: f32) -> Style:
+        Style { ...self, font_size: .Some(value) }
+
+    pub fn font_weight(self, value: f32) -> Style:
+        Style { ...self, font_weight: .Some(value) }
+
+    pub fn font_family(self, value: string) -> Style:
+        Style { ...self, font_family: .Some(value) }
+
+    pub fn disabled(self, value: bool) -> Style:
+        Style { ...self, disabled: .Some(value) }
+
+    pub fn dom_class(self, value: string) -> Style:
+        Style { ...self, dom_class: .Some(value) }
+
+    ## All four paddings.
+    pub fn padding(self, px: f32) -> Style:
+        self.padding_x(px).padding_y(px)
+
+    ## Left and right padding.
+    pub fn padding_x(self, px: f32) -> Style:
+        Style { ...self, padding_left: .Some(px), padding_right: .Some(px) }
+
+    ## Top and bottom padding.
+    pub fn padding_y(self, px: f32) -> Style:
+        Style { ...self, padding_top: .Some(px), padding_bottom: .Some(px) }
+
+    ## All four margins.
+    pub fn margin(self, px: f32) -> Style:
+        Style {
+            ...self,
+            margin_top: .Some(px),
+            margin_right: .Some(px),
+            margin_bottom: .Some(px),
+            margin_left: .Some(px),
+        }
+
+    ## A border of `px` in `color`.
+    pub fn border(self, px: f32, color: Color) -> Style:
+        Style { ...self, border_width: .Some(px), border_color: .Some(color) }
+
+    ## Fields set in `other` replace this style's; the rest are kept.
+    pub fn merge(self, other: Style) -> Style:
+        Style {
+            direction: if other.direction.is_some(): other.direction else: self.direction,
+            wrap: if other.wrap.is_some(): other.wrap else: self.wrap,
+            justify: if other.justify.is_some(): other.justify else: self.justify,
+            align: if other.align.is_some(): other.align else: self.align,
+            gap: if other.gap.is_some(): other.gap else: self.gap,
+            grow: if other.grow.is_some(): other.grow else: self.grow,
+            shrink: if other.shrink.is_some(): other.shrink else: self.shrink,
+            width: if other.width.is_some(): other.width else: self.width,
+            height: if other.height.is_some(): other.height else: self.height,
+            min_width: if other.min_width.is_some(): other.min_width else: self.min_width,
+            min_height: if other.min_height.is_some(): other.min_height else: self.min_height,
+            max_width: if other.max_width.is_some(): other.max_width else: self.max_width,
+            max_height: if other.max_height.is_some(): other.max_height else: self.max_height,
+            padding_top: if other.padding_top.is_some(): other.padding_top else: self.padding_top,
+            padding_right: if other.padding_right.is_some(): other.padding_right else: self.padding_right,
+            padding_bottom: if other.padding_bottom.is_some(): other.padding_bottom else: self.padding_bottom,
+            padding_left: if other.padding_left.is_some(): other.padding_left else: self.padding_left,
+            margin_top: if other.margin_top.is_some(): other.margin_top else: self.margin_top,
+            margin_right: if other.margin_right.is_some(): other.margin_right else: self.margin_right,
+            margin_bottom: if other.margin_bottom.is_some(): other.margin_bottom else: self.margin_bottom,
+            margin_left: if other.margin_left.is_some(): other.margin_left else: self.margin_left,
+            border_width: if other.border_width.is_some(): other.border_width else: self.border_width,
+            border_color: if other.border_color.is_some(): other.border_color else: self.border_color,
+            radius: if other.radius.is_some(): other.radius else: self.radius,
+            background: if other.background.is_some(): other.background else: self.background,
+            opacity: if other.opacity.is_some(): other.opacity else: self.opacity,
+            overflow: if other.overflow.is_some(): other.overflow else: self.overflow,
+            cursor: if other.cursor.is_some(): other.cursor else: self.cursor,
+            color: if other.color.is_some(): other.color else: self.color,
+            font_size: if other.font_size.is_some(): other.font_size else: self.font_size,
+            font_weight: if other.font_weight.is_some(): other.font_weight else: self.font_weight,
+            font_family: if other.font_family.is_some(): other.font_family else: self.font_family,
+            disabled: if other.disabled.is_some(): other.disabled else: self.disabled,
+            dom_class: if other.dom_class.is_some(): other.dom_class else: self.dom_class,
+        }
+
+fn direction_word(value: Direction) -> string:
+    match value:
+        .Row => "row"
+        .Column => "column"
+
+fn justify_word(value: Justify) -> string:
+    match value:
+        .Start => "start"
+        .Center => "center"
+        .End => "end"
+        .Between => "between"
+        .Around => "around"
+
+fn align_word(value: Align) -> string:
+    match value:
+        .Start => "start"
+        .Center => "center"
+        .End => "end"
+        .Stretch => "stretch"
+
+fn overflow_word(value: Overflow) -> string:
+    match value:
+        .Visible => "visible"
+        .Hidden => "hidden"
+        .Scroll => "scroll"
+
+fn cursor_word(value: Cursor) -> string:
+    match value:
+        .Default => "default"
+        .Pointer => "pointer"
+        .Text => "text"
+
+## Every key of `style`, in lowering order, with its value or `.None`.
+pub fn entries(style: Style) -> List[(string, PropValue?)]:
+    let mut out: List[(string, PropValue?)] = []
+    out.push(("direction", style.direction.map(fn(v): PropValue.Text(direction_word(v)))))
+    out.push(("wrap", style.wrap.map(fn(v): PropValue.Flag(v))))
+    out.push(("justify", style.justify.map(fn(v): PropValue.Text(justify_word(v)))))
+    out.push(("align", style.align.map(fn(v): PropValue.Text(align_word(v)))))
+    out.push(("gap", style.gap.map(fn(v): PropValue.Number(v))))
+    out.push(("grow", style.grow.map(fn(v): PropValue.Number(v))))
+    out.push(("shrink", style.shrink.map(fn(v): PropValue.Number(v))))
+    out.push(("width", style.width.map(fn(v): PropValue.Extent(v))))
+    out.push(("height", style.height.map(fn(v): PropValue.Extent(v))))
+    out.push(("min_width", style.min_width.map(fn(v): PropValue.Extent(v))))
+    out.push(("min_height", style.min_height.map(fn(v): PropValue.Extent(v))))
+    out.push(("max_width", style.max_width.map(fn(v): PropValue.Extent(v))))
+    out.push(("max_height", style.max_height.map(fn(v): PropValue.Extent(v))))
+    out.push(("padding_top", style.padding_top.map(fn(v): PropValue.Number(v))))
+    out.push(("padding_right", style.padding_right.map(fn(v): PropValue.Number(v))))
+    out.push(("padding_bottom", style.padding_bottom.map(fn(v): PropValue.Number(v))))
+    out.push(("padding_left", style.padding_left.map(fn(v): PropValue.Number(v))))
+    out.push(("margin_top", style.margin_top.map(fn(v): PropValue.Number(v))))
+    out.push(("margin_right", style.margin_right.map(fn(v): PropValue.Number(v))))
+    out.push(("margin_bottom", style.margin_bottom.map(fn(v): PropValue.Number(v))))
+    out.push(("margin_left", style.margin_left.map(fn(v): PropValue.Number(v))))
+    out.push(("border_width", style.border_width.map(fn(v): PropValue.Number(v))))
+    out.push(("border_color", style.border_color.map(fn(v): PropValue.Paint(v))))
+    out.push(("radius", style.radius.map(fn(v): PropValue.Number(v))))
+    out.push(("background", style.background.map(fn(v): PropValue.Paint(v))))
+    out.push(("opacity", style.opacity.map(fn(v): PropValue.Number(v))))
+    out.push(("overflow", style.overflow.map(fn(v): PropValue.Text(overflow_word(v)))))
+    out.push(("cursor", style.cursor.map(fn(v): PropValue.Text(cursor_word(v)))))
+    out.push(("color", style.color.map(fn(v): PropValue.Paint(v))))
+    out.push(("font_size", style.font_size.map(fn(v): PropValue.Number(v))))
+    out.push(("font_weight", style.font_weight.map(fn(v): PropValue.Number(v))))
+    out.push(("font_family", style.font_family.map(fn(v): PropValue.Text(v))))
+    out.push(("disabled", style.disabled.map(fn(v): PropValue.Flag(v))))
+    out.push(("dom:class", style.dom_class.map(fn(v): PropValue.Text(v))))
+    out
+
+## The properties of `style` that are set, in key order: what a builder
+## emits after `Create`.
+pub fn lower(style: Style) -> List[(string, PropValue)]:
+    let mut out: List[(string, PropValue)] = []
+    for (key, value) in entries(style):
+        match value:
+            .Some(v) => out.push((key, v))
+            .None => pass
+    out
+
+## The keys whose value differs between `last` and `next`, with the new
+## value, or `Unset` for a key `next` leaves unset. Equal styles give an
+## empty list.
+pub fn diff(last: Style, next: Style) -> List[(string, PropValue)]:
+    let mut out: List[(string, PropValue)] = []
+    before := entries(last)
+    after := entries(next)
+    let index = 0
+    while index < after.len():
+        let (key, value) = after[index]
+        let (_, old) = before[index]
+        if value != old:
+            match value:
+                .Some(v) => out.push((key, v))
+                .None => out.push((key, PropValue.Unset))
+        index += 1
+    out

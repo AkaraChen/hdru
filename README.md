@@ -18,15 +18,15 @@ An app depends on `ui` and `ui-dom` and consents to
 `"dep.ui_dom.surface.Surface" = true` in its manifest.
 
 ```hd
-use dep.ui.{Ui, button, column, row, signal, text_live}
+use dep.ui.{Style, Ui, button, column, row, signal, text_live}
 use dep.ui_dom.{Surface, run_app}
 
 fn counter() -> void $ Ui:
     count := signal(+0)
-    column(gap=8):
+    column(style=Style::empty().gap(8.0).padding(12.0)):
         text_live:
             "Count: ${count.get()}"
-        row(gap=4):
+        row(style=Style::empty().gap(4.0)):
             button("-", fn(): count.update(fn(n): n - 1))
             button("+", fn(): count.update(fn(n): n + 1))
 
@@ -40,9 +40,15 @@ read inside a component body is a compile error.
 
 Builders take the caller's whole row, so a component that names a context
 key, `$ Ui + Provided[Theme]`, reads it anywhere in its body, and a missing
-provider is a compile error. `class=` on `column`, `row`, `text` and
-`button`, `attr` / `attr_live` on the last node, and `input` / `checkbox`
-bound to signals cover attributes and forms.
+provider is a compile error. `input` and `checkbox` are bound to signals.
+
+Style is typed and renderer-neutral (`docs/rendering.md`): builders take
+`style: Style = Style::empty()` with chain methods (`.gap(8.0)`,
+`.padding(12.0)`, `.bg(color)`), each set field crossing the protocol as
+one `SetProp(node, key, PropValue)`; `style_live:` inside a container's
+block restyles it by changed keys only; `Theme` is a requirement key
+whose palette is a signal, so dark mode is one write. `attr` and
+`Style.dom_class` reach DOM-only `dom:` keys.
 
 A `resource` loads a value with a suspending function whenever its key
 changes; the load runs on one of `run_app!`'s worker tasks while the
@@ -85,10 +91,11 @@ Tests run on the Node engine only; wasmtime is out of scope for now.
 - `reactive/src/graph.hd` the program-wide dependency graph and owner tree, and the low-level API (`run_effect`, `cleanup_on`, `new_owner`, `dispose`)
 - `reactive/src/reactive.hd` `signal`, `memo`, `effect`, `sync`, `batch`, `untrack`, `assert_no_writes`
 - `reactive/src/owner.hd` `root`, `owned`, `on_cleanup`; `reactive/src/context.hd` `given`, `use_given` (typed), `provide`, `use_context` (owner tree)
-- `ui/src/keys.hd` `Parent`, `Scope`, `type Ui = $ Owner + Parent`; `ui/src/protocol.hd` `DomCommand`, `UiEvent`
-- `ui/src/builders.hd` `column`, `row`, `text`, `text_live`, `button`, `show`, `attr`, `attr_live`, `last_node`; `ui/src/collections.hd` `for_each`; `ui/src/inputs.hd` `input`, `checkbox`, `on`
+- `ui/src/keys.hd` `Parent`, `Scope`, `type Ui = $ Owner + Parent`; `ui/src/protocol.hd` `Command`, `PropValue`, `Color`, `Size`, `UiEvent`
+- `ui/src/style.hd` `Style` and its lowering and diff; `ui/src/theme.hd` `Theme`, `Palette`, `provide_theme`
+- `ui/src/builders.hd` `view`, `column`, `row`, `text`, `text_live`, `button`, `show`, `style_live`, `attr`, `attr_live`, `last_node`; `ui/src/collections.hd` `for_each`; `ui/src/inputs.hd` `input`, `checkbox`, `on`
 - `ui/src/resource.hd` `resource` and `resource_with`: a value loaded by a `fn!` whenever a tracked key changes, optionally under a `std.task` policy
 - `ui/src/runtime.hd` `mount`, `dispatch`, `take_commands`, the handler and job tables, `run_job!`
 - `ui-dom/src/surface.hd` the `@host Surface` trait; `ui-dom/src/app.hd` `run_app!` and the worker pool; `ui-dom/src/recorder.hd` an hd `Surface` for tests
 - `ui-dom/providers/dom.mjs` the provider: real DOM in a browser, a printing in-memory tree elsewhere; `ui-dom/providers/dom.test.mjs` its Node test
-- `examples/counter`, `examples/todos`, `examples/fetcher`, `web/` (pages share `web/style.css`)
+- `examples/counter` (with a dark-mode switch), `examples/todos`, `examples/fetcher`, `web/` (pages share a reset, `web/style.css`)

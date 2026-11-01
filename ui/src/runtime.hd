@@ -6,7 +6,7 @@
 use std.function.FnMut
 use dep.reactive.{Mutate, NoTrack, Owner, OwnerId, SourceId, Track, WriteLog, batch, flush, new_owner, reset_graph_for_test}
 use pkg.keys.{HandlerId, NodeId, Parent, Scope, Ui}
-use pkg.protocol.{DomCommand, UiEvent}
+use pkg.protocol.{Command, UiEvent}
 
 ## A resource load waiting for a worker: a cold suspension that drives
 ## the loader and lands its result.
@@ -14,7 +14,7 @@ pub struct Job:
     pub task: mut Suspend[void]
 
 struct Runtime:
-    out: List[DomCommand]
+    out: List[Command]
     handlers: Map[HandlerId, fn(string) -> void $ Mutate]
     next_node: usize
     next_handler: usize
@@ -46,7 +46,7 @@ fn runtime() -> *mut Runtime:
     RUNTIME
 
 ## Queues one command for the next `take_commands`.
-pub fn emit(command: DomCommand) -> void:
+pub fn emit(command: Command) -> void:
     runtime().out.push(command)
 
 ## Makes a node id and emits its `Create`.
@@ -94,7 +94,7 @@ pub fn drop_job(id: usize) -> void:
     _ := runtime().jobs.remove(id)
 
 ## Drains and returns the queued commands.
-pub fn take_commands() -> List[DomCommand]:
+pub fn take_commands() -> List[Command]:
     rt := runtime()
     commands := rt.out
     rt.out = []

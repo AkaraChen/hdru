@@ -1,5 +1,5 @@
 use pkg.{
-    DomCommand,
+    Command,
     Resource,
     Ui,
     mount,
@@ -27,7 +27,7 @@ impl From[TimedOut] for LoadError:
 
 ## Runs every job registered so far, and any they register, then returns
 ## what they emitted.
-fn run_pending!() -> List[DomCommand]:
+fn run_pending!() -> List[Command]:
     while true:
         ids := take_new_jobs()
         if ids.is_empty():
@@ -69,7 +69,7 @@ it("retry runs the loader again after a failure, waiting on the clock"):
     landed := run_pending!()
     assert_equal(attempts.count, 3, reason="two failures, then success")
     assert_equal(clock.now().unix_milliseconds(), 300, reason="backoff waited 100ms, then 200ms")
-    assert_equal(landed, [DomCommand.SetText(1, "ready: user 1")], reason="landed")
+    assert_equal(landed, [Command.SetText(1, "ready: user 1")], reason="landed")
 
 it("a loader that keeps failing lands its last error"):
     reset_for_test()
@@ -81,7 +81,7 @@ it("a loader that keeps failing lands its last error"):
     landed := run_pending!()
     assert_equal(attempts.count, 3, reason="three attempts, as the backoff says")
     assert_equal(
-        landed, [DomCommand.SetText(1, "failed: attempt 3")],
+        landed, [Command.SetText(1, "failed: attempt 3")],
         reason="the last error",
     )
 
@@ -105,7 +105,7 @@ it("a loader slower than its timeout lands as Failed"):
     _ := take_commands()
     landed := run_pending!()
     assert_equal(
-        landed, [DomCommand.SetText(1, "failed: too slow")],
+        landed, [Command.SetText(1, "failed: too slow")],
         reason="the deadline won",
     )
 
@@ -131,4 +131,4 @@ it("policies compose: a deadline around a retry"):
     _ := take_commands()
     landed := run_pending!()
     assert_equal(attempts.count, 2, reason="one retry inside the deadline")
-    assert_equal(landed, [DomCommand.SetText(1, "ready: user 2")], reason="landed")
+    assert_equal(landed, [Command.SetText(1, "ready: user 2")], reason="landed")

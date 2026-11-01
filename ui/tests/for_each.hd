@@ -1,5 +1,5 @@
 use pkg.{
-    DomCommand,
+    Command,
     Signal,
     Ui,
     UiEvent,
@@ -58,7 +58,7 @@ fn todos_view() -> void $ Ui:
             ,
         )
 
-fn click(handler: usize) -> List[DomCommand]:
+fn click(handler: usize) -> List[Command]:
     dispatch(UiEvent { handler: handler, payload: "" })
     take_commands()
 
@@ -66,7 +66,7 @@ it("for_each mounts one row per item under a list node"):
     reset_for_test()
     _ := mount(todos_view)
     commands := take_commands()
-    assert_equal(commands.contains(.SetAttr(7, "class", "list")), true, reason="the list node")
+    assert_equal(commands.contains(.Create(7, "fragment")), true, reason="the list node")
     assert_equal(commands.contains(.Append(7, 8)), true, reason="row 1 under the list")
     assert_equal(commands.contains(.SetText(9, "a")), true, reason="row 1 text")
     assert_equal(commands.contains(.Append(7, 10)), true, reason="row 2 under the list")
@@ -81,8 +81,7 @@ it("rows keep identity across updates and emit only what changed"):
     assert_equal(
         click(3),
         [
-            .Create(12, "div"),
-            .SetAttr(12, "class", "item"),
+            .Create(12, "fragment"),
             .Append(7, 12),
             .Create(13, "text"),
             .Append(12, 13),
@@ -94,8 +93,7 @@ it("rows keep identity across updates and emit only what changed"):
     assert_equal(
         click(5),
         [
-            .Create(14, "div"),
-            .SetAttr(14, "class", "item"),
+            .Create(14, "fragment"),
             .Append(7, 14),
             .Create(15, "text"),
             .Append(14, 15),

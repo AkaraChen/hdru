@@ -1,4 +1,4 @@
-// The provider for `surface.Surface`.
+// The provider for `ui-dom`'s `surface.Surface`.
 //
 // In a browser it drives the real DOM under the element with id "app".
 // Anywhere else (hd run --engine node) it keeps an in-memory tree, prints
@@ -6,18 +6,126 @@
 // handler 0 to stop. Each item is a handler id, optionally with a payload:
 // "2,2,1" clicks, "4=milk,5" types "milk" into the field of handler 4.
 //
-// In the DOM, `SetAttr` of "value" or "checked" sets the property, which
-// is what a field shows once the user has edited it. A `Listen` for
-// "enter" is a keydown listener that reports Enter with the field's text;
-// a checkbox's payload is "true" or "false".
+// This is the DOM's half of rendering.md: the node kinds and the property
+// keys of its section 3 mapped onto elements and CSS, the way
+// react-native-web maps React Native's View and style. Unknown kinds render
+// as "box", unknown keys are dropped (each logged once), and keys with a
+// "dom:" prefix are this renderer's own: "dom:class" and "dom:attr:NAME".
 //
 // Commands arrive as { tag, fields }; an optional field is a value or
-// null; node, handler and job ids are Numbers. `next_job` returns a
-// Promise that a later `post_job` resolves, which is what lets the
-// runtime's worker tasks wait for resource loads.
+// null; node, handler and job ids are Numbers; a PropValue is
+// { tag: "Number" | "Text" | "Flag" | "Paint" | "Extent" | "Unset",
+// fields }. `next_job` returns a Promise that a later `post_job` resolves,
+// which is what lets the runtime's worker tasks wait for resource loads.
 //
-// Both factories are exported for providers/dom.test.mjs, which passes its
-// own `nodes` map to check that removed nodes are forgotten.
+// The factories and `cssFor` are exported for providers/dom.test.mjs.
+
+const px = (n) => `${n}px`;
+
+// The text of a Size: { tag: "Px" | "Pct" | "Auto" | "Fill", fields }.
+function sizeText(size) {
+  switch (size.tag) {
+    case "Px":
+      return px(size.fields.value);
+    case "Pct":
+      return `${size.fields.value}%`;
+    case "Auto":
+      return "auto";
+    default:
+      return null;
+  }
+}
+
+function colorText({ r, g, b, a }) {
+  return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${+(a / 255).toFixed(3)})`;
+}
+
+const words = {
+  justify: { start: "flex-start", center: "center", end: "flex-end", between: "space-between", around: "space-around" },
+  align: { start: "flex-start", center: "center", end: "flex-end", stretch: "stretch" },
+};
+
+// Font family tokens; anything else is passed through as a family name.
+const fonts = {
+  sans: "system-ui, sans-serif",
+  serif: "Georgia, serif",
+  mono: "ui-monospace, SFMono-Regular, Menlo, monospace",
+};
+
+const extentKeys = {
+  width: "width",
+  height: "height",
+  min_width: "minWidth",
+  min_height: "minHeight",
+  max_width: "maxWidth",
+  max_height: "maxHeight",
+};
+
+const pixelKeys = {
+  gap: "gap",
+  padding_top: "paddingTop",
+  padding_right: "paddingRight",
+  padding_bottom: "paddingBottom",
+  padding_left: "paddingLeft",
+  margin_top: "marginTop",
+  margin_right: "marginRight",
+  margin_bottom: "marginBottom",
+  margin_left: "marginLeft",
+  radius: "borderRadius",
+  font_size: "fontSize",
+};
+
+const plainKeys = {
+  grow: "flexGrow",
+  shrink: "flexShrink",
+  opacity: "opacity",
+  font_weight: "fontWeight",
+  overflow: "overflow",
+  cursor: "cursor",
+};
+
+const paintKeys = { border_color: "borderColor", background: "backgroundColor", color: "color" };
+
+// The CSS one portable property sets: a list of [style property, value]
+// pairs, with "" for each property an Unset clears; null for a key that is
+// not a style key.
+export function cssFor(key, value) {
+  const unset = value.tag === "Unset";
+  const f = value.fields;
+  if (key === "direction") return [["flexDirection", unset ? "" : f.value]];
+  if (key === "wrap") return [["flexWrap", unset ? "" : f.value ? "wrap" : "nowrap"]];
+  if (key in words) return [[key === "justify" ? "justifyContent" : "alignItems", unset ? "" : words[key][f.value] ?? ""]];
+  if (key in pixelKeys) return [[pixelKeys[key], unset ? "" : px(f.value)]];
+  if (key in plainKeys) return [[plainKeys[key], unset ? "" : String(f.value)]];
+  if (key in paintKeys) return [[paintKeys[key], unset ? "" : colorText(f.color)]];
+  if (key === "border_width") {
+    return [
+      ["borderWidth", unset ? "" : px(f.value)],
+      ["borderStyle", unset ? "" : "solid"],
+    ];
+  }
+  if (key === "font_family") return [["fontFamily", unset ? "" : fonts[f.value] ?? f.value]];
+  if (key in extentKeys) {
+    const property = extentKeys[key];
+    if (unset) return [[property, ""]];
+    const text = sizeText(f.size);
+    // Fill takes the room left along the parent's main axis (flex: 1 1 0)
+    // and stretches across it.
+    if (text === null) return [["flex", "1 1 0"], ["alignSelf", "stretch"], [property, ""]];
+    return [[property, text]];
+  }
+  return null;
+}
+
+// The style a kind starts with, and the element it makes.
+const kinds = {
+  box: { tag: "div", css: { display: "flex", flexDirection: "column" } },
+  text: { tag: "span", css: {} },
+  button: { tag: "button", css: {} },
+  input: { tag: "input", css: {}, type: "text" },
+  checkbox: { tag: "input", css: {}, type: "checkbox" },
+  fragment: { tag: "div", css: { display: "contents" } },
+};
 
 // What an event on `target` reports: a checkbox's state, a field's text,
 // or nothing for a button.
@@ -27,9 +135,16 @@ function payloadOf(target) {
   return "value" in target ? String(target.value) : "";
 }
 
-export function createDomSurface(root, nodes = new Map()) {
+function warnOnce(seen, what, log) {
+  if (seen.has(what)) return;
+  seen.add(what);
+  log(`ui: ignoring unknown ${what}`);
+}
+
+export function createDomSurface(root, nodes = new Map(), log = (line) => console.warn(line)) {
   nodes.set(0, root);
   const queue = [];
+  const seen = new Set();
   let waiting = null;
   const push = (event) => {
     if (waiting) {
@@ -50,12 +165,39 @@ export function createDomSurface(root, nodes = new Map()) {
   const forgetDescendants = (element) => {
     for (const child of element.querySelectorAll("[data-hd]")) nodes.delete(Number(child.dataset.hd));
   };
+  const setProp = (element, key, value) => {
+    const unset = value.tag === "Unset";
+    const f = value.fields;
+    if (key === "value") {
+      element.value = unset ? "" : f.value;
+    } else if (key === "checked") {
+      element.checked = !unset && f.value;
+    } else if (key === "disabled") {
+      element.disabled = !unset && f.value;
+    } else if (key === "dom:class") {
+      element.className = unset ? "" : f.value;
+    } else if (key.startsWith("dom:attr:")) {
+      const name = key.slice("dom:attr:".length);
+      if (unset) element.removeAttribute(name);
+      else element.setAttribute(name, String(f.value));
+    } else {
+      const css = cssFor(key, value);
+      if (css === null) warnOnce(seen, `property ${key}`, log);
+      else for (const [property, text] of css) element.style[property] = text;
+    }
+  };
   const apply = (command) => {
     const f = command.fields;
     switch (command.tag) {
       case "Create": {
-        const element =
-          f.kind === "text" ? document.createElement("span") : document.createElement(f.kind);
+        let kind = kinds[f.kind];
+        if (!kind) {
+          warnOnce(seen, `kind ${f.kind}`, log);
+          kind = kinds.box;
+        }
+        const element = document.createElement(kind.tag);
+        if (kind.type) element.type = kind.type;
+        Object.assign(element.style, kind.css);
         element.dataset.hd = String(f.node);
         nodes.set(f.node, element);
         break;
@@ -69,20 +211,19 @@ export function createDomSurface(root, nodes = new Map()) {
       case "SetText":
         node(f.node).textContent = f.text;
         break;
-      case "SetAttr": {
-        const element = node(f.node);
-        if (f.name === "value") element.value = f.value;
-        else if (f.name === "checked") element.checked = f.value === "true";
-        else element.setAttribute(f.name, f.value);
+      case "SetProp":
+        setProp(node(f.node), f.key, f.value);
         break;
-      }
       case "Listen": {
         const handler = f.handler;
         const element = node(f.node);
         if (f.event === "enter") {
+          // Not in rendering.md's event list: the todos example's Enter.
           element.addEventListener("keydown", (domEvent) => {
             if (domEvent.key === "Enter") push({ handler, payload: payloadOf(domEvent.target) });
           });
+        } else if (f.event === "key") {
+          element.addEventListener("keydown", (domEvent) => push({ handler, payload: domEvent.key }));
         } else {
           element.addEventListener(f.event, (domEvent) => {
             push({ handler, payload: payloadOf(domEvent.target) });
@@ -138,6 +279,24 @@ export function createDomSurface(root, nodes = new Map()) {
   };
 }
 
+// A PropValue as short text for the printed tree.
+function valueText(value) {
+  const f = value.fields;
+  switch (value.tag) {
+    case "Number":
+    case "Flag":
+      return String(f.value);
+    case "Text":
+      return f.value;
+    case "Paint":
+      return colorText(f.color);
+    case "Extent":
+      return sizeText(f.size) ?? "fill";
+    default:
+      return "unset";
+  }
+}
+
 export function createScriptedSurface(clicks, print, nodes = new Map()) {
   nodes.set(0, { id: 0, kind: "root", children: [], text: "", attrs: {} });
   const node = (id) => {
@@ -157,6 +316,7 @@ export function createScriptedSurface(clicks, print, nodes = new Map()) {
   };
   const describe = (command) => {
     const f = command.fields;
+    if (command.tag === "SetProp") return `SetProp node=${f.node} ${f.key}=${JSON.stringify(valueText(f.value))}`;
     const parts = Object.entries(f).map(([k, v]) => `${k}=${v === null ? "none" : JSON.stringify(v)}`);
     return `${command.tag} ${parts.join(" ")}`;
   };
@@ -181,8 +341,9 @@ export function createScriptedSurface(clicks, print, nodes = new Map()) {
       case "SetText":
         node(f.node).text = f.text;
         break;
-      case "SetAttr":
-        node(f.node).attrs[f.name] = f.value;
+      case "SetProp":
+        if (f.value.tag === "Unset") delete node(f.node).attrs[f.key];
+        else node(f.node).attrs[f.key] = valueText(f.value);
         break;
       case "Listen":
         node(f.node).attrs[`on:${f.event}`] = String(f.handler);

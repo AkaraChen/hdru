@@ -1,5 +1,6 @@
 use pkg.{
-    DomCommand,
+    Style,
+    Command,
     Mutate,
     Ui,
     UiEvent,
@@ -17,14 +18,14 @@ use pkg.{
 }
 use std.testing.assert_equal
 
-fn send(handler: usize, payload: string) -> List[DomCommand]:
+fn send(handler: usize, payload: string) -> List[Command]:
     dispatch(UiEvent { handler: handler, payload: payload })
     take_commands()
 
 fn form() -> void $ Ui:
     draft := signal("hello")
     column:
-        input(draft, class="grow")
+        input(draft, style=Style::empty().grow(1.0))
         on(
             "enter",
             fn(text: string) -> void $ Mutate:
@@ -42,14 +43,13 @@ it("input mounts with its value and listens for input"):
     assert_equal(
         take_commands(),
         [
-            .Create(1, "div"),
-            .SetAttr(1, "class", "column"),
+            .Create(1, "box"),
+            .SetProp(1, "direction", .Text("column")),
             .Append(0, 1),
             .Create(2, "input"),
-            .SetAttr(2, "type", "text"),
-            .SetAttr(2, "class", "grow"),
+            .SetProp(2, "grow", .Number(1.0)),
             .Append(1, 2),
-            .SetAttr(2, "value", "hello"),
+            .SetProp(2, "value", .Text("hello")),
             .Listen(2, "input", 1),
             .Listen(2, "enter", 2),
             .Create(3, "text"),
@@ -71,7 +71,7 @@ it("a keystroke updates the signal and is not echoed back"):
     reset_for_test()
     _ := mount(form)
     _ := take_commands()
-    assert_equal(send(1, "hello!"), [.SetText(3, "draft: hello!")], reason="no SetAttr for the typed value")
+    assert_equal(send(1, "hello!"), [.SetText(3, "draft: hello!")], reason="no SetProp for the typed value")
     assert_equal(send(1, "hello!"), [], reason="the same text again writes nothing")
 
 it("a write from elsewhere reaches the field"):
@@ -81,18 +81,18 @@ it("a write from elsewhere reaches the field"):
     _ := send(1, "typed")
     assert_equal(
         send(3, ""),
-        [.SetAttr(2, "value", ""), .SetText(3, "draft: ")],
+        [.SetProp(2, "value", .Text("")), .SetText(3, "draft: ")],
         reason="clear sends the new value to the field",
     )
     assert_equal(send(1, "x"), [.SetText(3, "draft: x")], reason="typing again is not echoed")
     assert_equal(
         send(4, ""),
-        [.SetAttr(2, "value", "filled"), .SetText(3, "draft: filled")],
+        [.SetProp(2, "value", .Text("filled")), .SetText(3, "draft: filled")],
         reason="fill",
     )
     assert_equal(
         send(2, "filled"),
-        [.SetAttr(2, "value", ""), .SetText(3, "draft: ")],
+        [.SetProp(2, "value", .Text("")), .SetText(3, "draft: ")],
         reason="enter clears it",
     )
 
@@ -108,8 +108,8 @@ it("checkbox follows change events and writes from elsewhere"):
     reset_for_test()
     _ := mount(agreement)
     commands := take_commands()
-    assert_equal(commands.contains(.SetAttr(2, "type", "checkbox")), true, reason="a checkbox")
-    assert_equal(commands.contains(.SetAttr(2, "checked", "false")), true, reason="initially unchecked")
+    assert_equal(commands.contains(.Create(2, "checkbox")), true, reason="a checkbox")
+    assert_equal(commands.contains(.SetProp(2, "checked", .Flag(false))), true, reason="initially unchecked")
     assert_equal(commands.contains(.Listen(2, "change", 1)), true, reason="listens for change")
     assert_equal(send(1, "true"), [.SetText(3, "agreed")], reason="checked by the user, not echoed")
-    assert_equal(send(2, ""), [.SetAttr(2, "checked", "false"), .SetText(3, "not yet")], reason="reset")
+    assert_equal(send(2, ""), [.SetProp(2, "checked", .Flag(false)), .SetText(3, "not yet")], reason="reset")

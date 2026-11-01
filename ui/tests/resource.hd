@@ -1,5 +1,5 @@
 use pkg.{
-    DomCommand,
+    Command,
     Resource,
     Ui,
     UiEvent,
@@ -43,7 +43,7 @@ fn profile() -> void $ Ui:
 
 ## Runs every job registered so far, and any they register, then returns
 ## what they emitted: what a worker pool would do, on the test task.
-fn run_pending!() -> List[DomCommand]:
+fn run_pending!() -> List[Command]:
     while true:
         ids := take_new_jobs()
         if ids.is_empty():
@@ -52,7 +52,7 @@ fn run_pending!() -> List[DomCommand]:
             run_job!(id)
     take_commands()
 
-fn click(handler: usize) -> List[DomCommand]:
+fn click(handler: usize) -> List[Command]:
     dispatch(UiEvent { handler: handler, payload: "" })
     take_commands()
 

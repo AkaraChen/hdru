@@ -411,6 +411,77 @@ real browser the todos page adds a typed todo and the fetcher loads.
 - The surface file in `ui` is `protocol.hd`, not `surface.hd`, since the
   trait it was named for moved out.
 
+## Phase 12: the renderer protocol and typed style (2026-11-02)
+
+Implements `rendering.md`. Gate met: `hd test` at the root, 60 cases
+(the 55 of phase 11, less the four `attrs.hd` cases, plus eight in
+`ui/tests/style.hd` and the `style_live` doc test); `node --test
+ui-dom/providers/dom.test.mjs`, 4 cases, one of which checks every key
+of section 3 against the CSS the table names, with `Unset` clearing each;
+the three examples under Node; the browser pages in a real browser,
+including the counter's dark-mode switch.
+
+- **Protocol.** `DomCommand` is `Command`, with `SetProp(node, key,
+  PropValue)` instead of `SetAttr`. `PropValue`, `Color` and `Size` are as
+  designed, but every variant payload has a field name (`Number(value:
+  f32)`, `Paint(color: Color)`, `Size.Px(value: f32)`) because enum
+  fields cross the ABI by name (`{ tag, fields }`). `rgb` and `rgba` build
+  colors.
+- **`Style`** (`ui/src/style.hd`) has one optional field per key of the
+  table, edges as four fields, plus `dom_class`. The file is generated
+  from one field table, so field order, lowering order and diff order are
+  the same: the order of `rendering.md`'s table. `entries(style)` lists
+  every key with its value or `.None`; `lower` keeps the set ones; `diff`
+  compares two entry lists index by index and gives `Unset` for a key that
+  went to `.None`. Besides one chain method per field there are
+  `padding`, `padding_x`, `padding_y`, `margin`, `border(px, color)` and
+  `merge`. The background setter is `bg`, as designed.
+- **The box builder is `view`, not `box`.** `box(...)` is hd's allocation
+  builtin, used all through the library (`box(Scope { ... })`); a public
+  `box` builder would shadow it in every importing module. The kind is
+  still `"box"`. `column` and `row` are `view` with `direction` set, which
+  they always emit, so a column's direction is explicit for renderers that
+  do not default to column. `gap` the parameter is gone.
+- **Lowering order**: `Create`, one `SetProp` per set field in key order,
+  `Append`, then content. `style_live`'s props come after the container's
+  `Append`, since its block runs inside the container's.
+- **`style_live`** restyles `$.use(Parent).parent()`. Its first run is
+  compared with an empty style, so the keys a live style sets are its own;
+  mixing a static and a live value for one key would let `Unset` remove
+  the static one, which the doc comment says. A block that reads no signal
+  needs its row written out (rule 1), as `text_live`'s does.
+- **Two kinds the design did not list.** `show` and `for_each` render into
+  wrapper nodes that only group; with the stylesheet reduced to a reset,
+  their old `display: contents` classes had to become protocol. They are
+  kind `"fragment"`: a node that lays its children out as if they were its
+  parent's. And `checkbox` is kind `"checkbox"` with a `checked` flag,
+  since the table had only a text `input`. Both are vocabulary, not
+  protocol changes.
+- **`attr` / `attr_live`** lower to `dom:attr:<name>`. `text_live` has no
+  `style` (positional block), so a live text is styled by a wrapping
+  `view`; the demos do that.
+- **Theme** (`ui/src/theme.hd`): `trait Theme: fn palette(self) ->
+  ReadSignal[Palette]`, `SignalTheme`, `provide_theme(palette_signal,
+  body)` in the extension form, and `Palette::light()` / `dark()` with
+  roles `background`, `surface`, `on_surface`, `muted`, `line`, `accent`,
+  `on_accent`. The test `a theme switch is one signal write` shows a
+  switch emitting only the changed key.
+- **Provider.** `cssFor(key, value)` is the key table as a pure function
+  (exported, and tested without a DOM); `width: Fill` maps to `flex: 1 1
+  0; align-self: stretch`. `value`, `checked` and `disabled` set element
+  properties; `dom:class` sets `className`; `dom:attr:NAME` sets or
+  removes an attribute. Unknown kinds render as `box`, and unknown keys
+  are dropped, each logged once. The provider also reports the `key`
+  event (payload: the key name) and keeps the `enter` event from phase 13.
+  The scripted tree prints props as `key="value"`.
+- **Inheritance.** The vocabulary promises none, but the demos set
+  `color` on containers through `style_live` and rely on the DOM to pass
+  it to text, because a live text cannot take a style. A non-inheriting
+  renderer would need text-level styles; `rendering.md` already names a
+  `text_live` variant with a style as the follow-up.
+- `web/style.css` is a reset; the demos style themselves. The counter has
+  a dark-mode button.
+
 ## Superseded: attributes and styles (2026-11-02, old phase 11)
 
 Built under the first numbering of `roadmap.md`, where phase 11 was

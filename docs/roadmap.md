@@ -1,7 +1,7 @@
 # Roadmap: from bootstrap to library
 
-Status: phases 9 to 14 implemented on 2026-11-02; `design.md` records
-where each departed from this plan. Written as a plan the same day after a
+Status: phases 9 to 15 implemented on 2026-11-02 (11 and 12 after the
+renumbering); `design.md` records where each departed from this plan. Written as a plan the same day after a
 review of the phase 0 to 8 code against `../hd-lang` at `cf5040b4a`. `bootstrap.md` is the plan that got
 us here and `design.md` the record of what was built. This file says what
 comes next and why, in the order to do it.

@@ -32,7 +32,9 @@ pub use dep.reactive.{
     use_given,
 }
 pub use pkg.keys.{HandlerId, NodeId, Parent, Scope, Ui}
-pub use pkg.protocol.{DomCommand, UiEvent}
+pub use pkg.protocol.{Color, Command, PropValue, Size, UiEvent, rgb, rgba}
+pub use pkg.style.{Align, Cursor, Direction, Justify, Overflow, Style, diff, lower}
+pub use pkg.theme.{Palette, SignalTheme, Theme, provide_theme}
 pub use pkg.runtime.{
     dispatch,
     last_writes,
@@ -43,6 +45,6 @@ pub use pkg.runtime.{
     take_new_jobs,
 }
 pub use pkg.resource.{Resource, resource, resource_with}
-pub use pkg.builders.{attr, attr_live, button, column, last_node, row, show, text, text_live}
+pub use pkg.builders.{attr, attr_live, button, column, last_node, row, show, style_live, text, text_live, view}
 pub use pkg.collections.{for_each}
 pub use pkg.inputs.{checkbox, input, on}

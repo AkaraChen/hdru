@@ -1,27 +1,72 @@
-## The renderer protocol: the commands the runtime sends and the events it
-## receives. A renderer package (`ui-dom`) declares the host trait that
-## carries them.
+## The renderer protocol (`rendering.md`, layer 2): eight operations on
+## opaque node ids, and the events a renderer reports back. The protocol
+## carries no vocabulary: node kinds, property keys and event names are
+## data, defined by `style.hd` and the builders, so adding a property never
+## changes the host trait. A renderer package (`ui-dom`) declares the host
+## trait that carries these.
 use pkg.keys.{HandlerId, NodeId}
 
 @derive(Eq, Debug)
-pub enum DomCommand:
-    ## Makes a node of `kind`: "div", "button" or "text".
+pub enum Command:
+    ## Makes a node of `kind`: "box", "text", "button", "input", "checkbox"
+    ## or "fragment". A renderer treats an unknown kind as "box".
     Create(node: NodeId, kind: string)
     ## Appends `child` as the last child of `parent`.
     Append(parent: NodeId, child: NodeId)
     ## Moves `child` under `parent`, before `before`, or last when `.None`.
     MoveBefore(parent: NodeId, child: NodeId, before: NodeId?)
-    SetText(node: NodeId, text: string)
-    SetAttr(node: NodeId, name: string, value: string)
-    ## Reports `event` on `node` as `UiEvent { handler, payload }`.
-    Listen(node: NodeId, event: string, handler: HandlerId)
     ## Removes `node` and its subtree.
     Remove(node: NodeId)
     ## Removes every child of `node`, keeping the node.
     Clear(node: NodeId)
+    ## The text of a "text" or "button" node.
+    SetText(node: NodeId, text: string)
+    ## Sets one property, or removes it when `value` is `Unset`. Keys are
+    ## vocabulary; a renderer ignores a key it does not know, and a key
+    ## with another renderer's prefix (`dom:class`) is that renderer's.
+    SetProp(node: NodeId, key: string, value: PropValue)
+    ## Reports `event` on `node` as `UiEvent { handler, payload }`.
+    Listen(node: NodeId, event: string, handler: HandlerId)
+
+## A property value. Typed because the protocol crosses an ABI, and a
+## renderer in another language must not parse "8px" or "#336699".
+@derive(Eq, Debug)
+pub enum PropValue:
+    Number(value: f32)
+    Text(value: string)
+    Flag(value: bool)
+    Paint(color: Color)
+    Extent(size: Size)
+    Unset
+
+## An sRGB color with alpha, each channel 0 to 255.
+@derive(Eq, Debug)
+pub struct Color:
+    pub r: u8
+    pub g: u8
+    pub b: u8
+    pub a: u8
+
+## A length: logical pixels, a percentage of the parent, the renderer's
+## natural size, or all the room the parent has left.
+@derive(Eq, Debug)
+pub enum Size:
+    Px(value: f32)
+    Pct(value: f32)
+    Auto
+    Fill
 
 @derive(Eq, Debug)
 pub struct UiEvent:
     pub handler: HandlerId
-    ## The input value for an input event; empty for a click.
+    ## The value for an `input` or `change` event, the key name for `key`;
+    ## empty for a click.
     pub payload: string
+
+## An opaque color from its three channels.
+pub fn rgb(r: u8, g: u8, b: u8) -> Color:
+    Color { r: r, g: g, b: b, a: 255 }
+
+## A color from its three channels and an alpha.
+pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color:
+    Color { r: r, g: g, b: b, a: a }

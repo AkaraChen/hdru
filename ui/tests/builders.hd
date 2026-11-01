@@ -1,5 +1,6 @@
 use pkg.{
-    DomCommand,
+    Style,
+    Command,
     UiEvent,
     button,
     column,
@@ -17,7 +18,7 @@ use std.testing.assert_equal
 
 fn counter() -> void $ Ui:
     count := signal(+0)
-    column(gap=8):
+    column(style=Style::empty().gap(8.0)):
         text_live:
             "Count: ${count.get()}"
         row:
@@ -38,16 +39,16 @@ fn counter() -> void $ Ui:
 it("mounting the counter emits the tree in order"):
     reset_for_test()
     _ := mount(counter)
-    let expected: List[DomCommand] = [
-        .Create(1, "div"),
-        .SetAttr(1, "class", "column"),
-        .SetAttr(1, "style", "gap:8px"),
+    let expected: List[Command] = [
+        .Create(1, "box"),
+        .SetProp(1, "direction", .Text("column")),
+        .SetProp(1, "gap", .Number(8.0)),
         .Append(0, 1),
         .Create(2, "text"),
         .Append(1, 2),
         .SetText(2, "Count: 0"),
-        .Create(3, "div"),
-        .SetAttr(3, "class", "row"),
+        .Create(3, "box"),
+        .SetProp(3, "direction", .Text("row")),
         .Append(1, 3),
         .Create(4, "button"),
         .Append(3, 4),
@@ -88,14 +89,14 @@ it("static text and nesting append to the right parent"):
     assert_equal(
         take_commands(),
         [
-            .Create(1, "div"),
-            .SetAttr(1, "class", "column"),
+            .Create(1, "box"),
+            .SetProp(1, "direction", .Text("column")),
             .Append(0, 1),
             .Create(2, "text"),
             .Append(1, 2),
             .SetText(2, "a"),
-            .Create(3, "div"),
-            .SetAttr(3, "class", "row"),
+            .Create(3, "box"),
+            .SetProp(3, "direction", .Text("row")),
             .Append(1, 3),
             .Create(4, "text"),
             .Append(3, 4),

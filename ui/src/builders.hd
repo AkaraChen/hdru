@@ -1,10 +1,14 @@
 ## Node builders. Each reads `$.use(Owner)` and `$.use(Parent)` into locals
 ## and never captures them; a container runs its block under a fresh
-## `Parent` that names the new node.
+## `Parent` that names the new node. Each takes `style: Style =
+## Style::empty()` and emits one `SetProp` per set field after `Create`,
+## then attaches the node.
 use std.function.{Fn, FnMut}
 use dep.reactive.{Mutate, NoTrack, Owner, OwnerId, Reactive, Track, cleanup_on, dispose, new_owner, run_effect}
 use pkg.keys.{NodeId, Parent, Scope, Ui}
+use pkg.protocol.PropValue
 use pkg.runtime.{built_last, create_node, drop_handler, emit, mark_built, register_handler}
+use pkg.style.{Direction, Style, diff, lower}
 
 struct Last:
     text: string
@@ -14,36 +18,36 @@ struct Last:
 struct Shown:
     child: OwnerId?
 
-fn container[$R](
-    kind: string,
-    class: string,
-    gap: i32,
-    children: fn() -> void $ Ui + R,
-) -> void $ Ui + R:
-    owner := $.use(Owner).owner()
+struct LastStyle:
+    style: Style
+
+## Emits one `SetProp` for each field `style` sets, in key order.
+pub fn apply_style(node: NodeId, style: Style) -> void:
+    for (key, value) in lower(style):
+        emit(.SetProp(node, key, value))
+
+## Makes a node of `kind` with `style`, appended to the current parent.
+pub fn styled_node(kind: string, style: Style) -> NodeId $ Ui:
     parent := $.use(Parent).parent()
-    node := create_node("div")
-    emit(.SetAttr(node, "class", classes(kind, class)))
-    if gap > 0:
-        emit(.SetAttr(node, "style", "gap:${gap}px"))
+    node := create_node(kind)
+    apply_style(node, style)
     emit(.Append(parent, node))
+    node
+
+## A box: a flex container, a column unless `style` says otherwise, whose
+## block runs now under the caller's row. `column` and `row` are views
+## with the direction set.
+pub fn view[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+    owner := $.use(Owner).owner()
+    node := styled_node("box", style)
     $.with(Parent=box(Scope { owner: owner, parent: node })):
         children()
     mark_built(node)
 
-# The class attribute of a node whose builder has a class of its own.
-fn classes(kind: string, class: string) -> string:
-    if class == "": kind else: "$kind $class"
-
-# Emits `class` on a node whose builder has none of its own, when given.
-fn set_class(node: NodeId, class: string) -> void:
-    if class != "":
-        emit(.SetAttr(node, "class", class))
-
-## A vertical container. The block runs now, under the caller's row: any
-## key the component names besides `Ui`, say `Theme`, reaches every block
-## nested inside it, and a key the component does not name is a compile
-## error. So an eager read in a component whose row is `$ Ui` fails:
+## A vertical box. The block runs now, under the caller's row: any key the
+## component names besides `Ui`, say `Theme`, reaches every block nested
+## inside it, and a key the component does not name is a compile error. So
+## an eager read in a component whose row is `$ Ui` fails:
 ##
 ## ```hd
 ## use pkg.{Ui, column, signal, text}
@@ -54,39 +58,56 @@ fn set_class(node: NodeId, class: string) -> void:
 ##         text("$n")
 ## ```
 ##
-## `class` adds to the `column` class, so `column(class="card", gap=8):`
-## makes a node of class `column card`. Name it: a positional argument
-## cannot skip `gap`.
-pub fn column[$R](
-    gap: i32 = 0,
-    class: string = "",
-    children: fn() -> void $ Ui + R,
-) -> void $ Ui + R:
-    container("column", class, gap, children)
+## `column(style=Style::empty().gap(8.0).padding(12.0)):` styles it; name
+## the argument, since the block is the last parameter.
+pub fn column[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+    view(Style { ...style, direction: .Some(.Column) }, children)
 
-## A horizontal container; its block runs under the caller's row, as
-## `column`'s does.
-pub fn row[$R](
-    gap: i32 = 0,
-    class: string = "",
-    children: fn() -> void $ Ui + R,
-) -> void $ Ui + R:
-    container("row", class, gap, children)
+## A horizontal box; its block runs under the caller's row, as `column`'s
+## does.
+pub fn row[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+    view(Style { ...style, direction: .Some(.Row) }, children)
 
-## Static text, with an optional `class`.
-pub fn text(content: string, class: string = "") -> void $ Ui:
-    parent := $.use(Parent).parent()
-    node := create_node("text")
-    set_class(node, class)
-    emit(.Append(parent, node))
+## Restyles the enclosing container: inside a `column:`, `row:` or `view:`
+## block, the block of `style_live` returns a `Style` that follows the
+## signals it reads. Each run emits a `SetProp` only for the keys that
+## changed since the last run, and `Unset` for a key that went unset; an
+## equal style emits nothing. The first run is compared with an empty
+## style, so the keys a live style sets are its own: give a key either a
+## static or a live value, not both.
+##
+## ```hd
+## use pkg.{Style, Ui, column, signal, style_live, text}
+## fn faded() -> void $ Ui:
+##     dim := signal(false)
+##     column:
+##         style_live:
+##             Style::empty().opacity(if dim.get(): 0.5 else: 1.0)
+##         text("hello")
+## ```
+pub fn style_live[F < 'static & Fn() -> Style $ Track](compute: F) -> void $ Ui:
+    owner := $.use(Owner).owner()
+    node := $.use(Parent).parent()
+    last := box(LastStyle { style: Style::empty() })
+    run := fn() -> bool $ Reactive:
+        next := compute()
+        for (key, value) in diff(last.style, next):
+            emit(.SetProp(node, key, value))
+        last.style = next
+        false
+    _ := run_effect(owner, run)
+
+## Static text.
+pub fn text(content: string, style: Style = Style::empty()) -> void $ Ui:
+    node := styled_node("text", style)
     emit(.SetText(node, content))
     mark_built(node)
 
 ## Text that follows the signals it reads. The block runs now and again
 ## whenever one of them changes; equal text emits nothing. It takes no
-## `class`, because the block is usually passed positionally and a
-## positional argument cannot skip a default; follow it with
-## `attr("class", ...)` instead.
+## `style`, because the block is usually passed positionally and a
+## positional argument cannot skip a default; wrap it in a styled `view`
+## instead.
 pub fn text_live[F < 'static & Fn() -> string $ Track](compute: F) -> void $ Ui:
     owner := $.use(Owner).owner()
     parent := $.use(Parent).parent()
@@ -113,18 +134,15 @@ fn follow[F < 'static & Fn() -> string $ Track, W < 'static & Fn(string) -> void
     _ := run_effect(owner, run)
 
 ## A button. The handler may write signals but not read them tracked; use
-## `peek` or `update`. `class` comes after the handler and is named:
-## `button("save", save, class="primary")`.
+## `peek` or `update`. `style` comes after the handler and is named:
+## `button("save", save, style=primary)`.
 pub fn button[F < 'static & FnMut() -> void $ Mutate](
     label: string,
     mut on_click: F,
-    class: string = "",
+    style: Style = Style::empty(),
 ) -> void $ Ui:
     owner := $.use(Owner).owner()
-    parent := $.use(Parent).parent()
-    node := create_node("button")
-    set_class(node, class)
-    emit(.Append(parent, node))
+    node := styled_node("button", style)
     emit(.SetText(node, label))
     listen(owner, node, "click", fn(payload: string) -> void $ Mutate: on_click())
     mark_built(node)
@@ -141,7 +159,8 @@ pub fn listen[F < 'static & FnMut(string) -> void $ Mutate](
     cleanup_on(owner, fn() -> void: drop_handler(id))
 
 ## Mounts `branch` while `when` is true and disposes it when it turns
-## false. The branch keeps its place: it renders into a fragment node that
+## false. The branch keeps its place: it renders into a "fragment" node,
+## which lays its children out as if they were its parent's, and which
 ## stays in the parent.
 pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui](
     when: C,
@@ -149,8 +168,7 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
 ) -> void $ Ui:
     owner := $.use(Owner).owner()
     parent := $.use(Parent).parent()
-    fragment := create_node("div")
-    emit(.SetAttr(fragment, "class", "show"))
+    fragment := create_node("fragment")
     emit(.Append(parent, fragment))
     shown := box(Shown { child: .None })
     run := fn() -> bool $ Reactive:
@@ -179,8 +197,9 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
 pub fn last_node() -> NodeId $ Ui:
     built_last()
 
-## Sets a static attribute on `last_node()`, so it follows the builder it
-## applies to:
+## Sets a DOM attribute on `last_node()`, the escape hatch for what the
+## portable vocabulary lacks. It lowers to the `dom:`-prefixed key
+## `dom:attr:<name>`, which other renderers ignore:
 ##
 ## ```hd
 ## use pkg.{Ui, attr, column, text}
@@ -190,15 +209,13 @@ pub fn last_node() -> NodeId $ Ui:
 ##         attr("title", "greeting")
 ##     attr("id", "main")
 ## ```
-##
-## `style` is one attribute, a string.
 pub fn attr(name: string, value: string) -> void $ Ui:
-    emit(.SetAttr(last_node(), name, value))
+    emit(.SetProp(last_node(), "dom:attr:$name", .Text(value)))
 
-## An attribute of `last_node()` that follows the signals `compute` reads,
-## as `text_live` does for text: one `SetAttr` per change and none for an
-## equal value.
+## A DOM attribute of `last_node()` that follows the signals `compute`
+## reads, as `text_live` does for text: one `SetProp` per change and none
+## for an equal value.
 pub fn attr_live[F < 'static & Fn() -> string $ Track](name: string, compute: F) -> void $ Ui:
     owner := $.use(Owner).owner()
     node := last_node()
-    follow(owner, compute, fn(next: string) -> void: emit(.SetAttr(node, name, next)))
+    follow(owner, compute, fn(next: string) -> void: emit(.SetProp(node, "dom:attr:$name", .Text(next))))

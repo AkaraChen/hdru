@@ -1,15 +1,19 @@
 use dep.ui.{
+    Palette,
     Resource,
     Signal,
+    Style,
     Ui,
-    attr,
-    attr_live,
     button,
     column,
     resource,
+    rgb,
+    rgba,
     row,
     signal,
+    style_live,
     text_live,
+    view,
 }
 use dep.ui_dom.{Surface, run_app}
 use std.time.{Clock, ms}
@@ -36,39 +40,46 @@ fn profile(id: Signal[i32]) -> void $ Ui + Clock:
         fn!(key: i32) -> Result[string, string]: fetch_profile!(clock, key)
         ,
     )
-    text_live:
-        describe(loaded.get())
-    attr_live(
-        "class",
-        fn():
+    p := Palette::light()
+    # The text's color follows the load: muted while loading, red on a
+    # failure. On the DOM the text inherits it from this view.
+    view:
+        style_live:
             match loaded.get():
-                .Loading => "muted"
-                .Ready(_) => ""
-                .Failed(_) => "done"
-        ,
-    )
+                .Loading => Style::empty().color(p.muted)
+                .Ready(_) => Style::empty().color(p.on_surface)
+                .Failed(_) => Style::empty().color(rgb(190, 40, 40))
+        text_live:
+            describe(loaded.get())
+
+## A button that reads on either palette.
+fn quiet() -> Style:
+    Style::empty().padding_x(10.0).padding_y(4.0).radius(6.0).border(1.0, rgba(128, 128, 128, 128)).bg(rgba(0, 0, 0, 0)).cursor(.Pointer)
 
 fn app() -> void $ Ui + Clock:
+    p := Palette::light()
     id := signal(+1)
-    column(class="card", gap=8):
-        text_live:
-            "user ${id.get()}"
-        attr("class", "title")
+    column(style=Style::empty().gap(8.0).padding(16.0).radius(8.0).border(1.0, p.line).bg(p.surface)):
+        view(style=Style::empty().font_size(18.0).font_weight(600.0)):
+            text_live:
+                "user ${id.get()}"
         profile(id)
-        row(gap=4):
+        row(style=Style::empty().gap(4.0)):
             button(
                 "previous",
                 fn():
                     id.update(fn(n): n - 1)
                 ,
+                style=quiet(),
             )
             button(
                 "next",
                 fn():
                     id.update(fn(n): n + 1)
                 ,
+                style=quiet(),
             )
-            button("unlucky", fn(): id.set(+13))
+            button("unlucky", fn(): id.set(+13), style=quiet())
 
 pub fn main!() -> void $ Surface + Clock:
     run_app!(app)

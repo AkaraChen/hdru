@@ -1,67 +1,13 @@
-/* Shared by the demo pages. Keyed on the classes the builders emit:
-   .column and .row from the containers, .show/.list/.item from the
-   fragments of show and for_each, and the app's own classes. */
-:root {
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --text: #1d232b;
-  --muted: #667180;
-  --line: #d9dee5;
-  --accent: #2f6fdb;
-  --accent-text: #ffffff;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #14171c;
-    --surface: #1d2229;
-    --text: #e4e8ee;
-    --muted: #96a0ad;
-    --line: #333b45;
-    --accent: #6c9cf0;
-    --accent-text: #0b1220;
-  }
-}
+/* A reset for the demo pages, and nothing else: the apps style themselves
+   through ui's Style and Theme (docs/rendering.md), and the provider
+   turns each property into inline CSS. */
+*, *::before, *::after { box-sizing: border-box; }
 body {
-  font: 16px/1.4 system-ui, sans-serif;
   margin: 0;
   padding: 2rem 1rem;
-  background: var(--bg);
-  color: var(--text);
+  font: 16px/1.4 system-ui, sans-serif;
 }
 main { max-width: 36rem; margin: 0 auto; }
 h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
-a { color: var(--accent); }
-.column { display: flex; flex-direction: column; }
-.row { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; }
-.show, .list, .item { display: contents; }
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 1rem;
-}
-.title { font-weight: 600; font-size: 1.1rem; }
-.muted { color: var(--muted); }
-.done { color: var(--muted); text-decoration: line-through; }
-.grow { flex: 1; }
-button {
-  font: inherit;
-  padding: 0.3rem 0.8rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text);
-  cursor: pointer;
-}
-button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-input[type="text"] {
-  font: inherit;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-}
-#status { color: var(--muted); margin-top: 2rem; font-size: 0.9rem; }
+button, input { font: inherit; color: inherit; }
+#status { color: #667180; margin-top: 2rem; font-size: 0.9rem; }

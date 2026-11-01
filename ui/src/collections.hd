@@ -31,8 +31,7 @@ pub fn for_each[
 ](items: ReadSignal[List[T]], key: KF, render: R) -> void $ Ui:
     owner := $.use(Owner).owner()
     parent := $.use(Parent).parent()
-    fragment := create_node("div")
-    emit(.SetAttr(fragment, "class", "list"))
+    fragment := create_node("fragment")
     emit(.Append(parent, fragment))
     state := box(Rows::[T, K] { rows: {}, order: [] })
     run := fn() -> bool $ Reactive:
@@ -60,8 +59,7 @@ pub fn for_each[
             else:
                 child := new_owner(.Some(owner))
                 item_signal := signal(item)
-                node := create_node("div")
-                emit(.SetAttr(node, "class", "item"))
+                node := create_node("fragment")
                 emit(.Append(fragment, node))
                 scope := box(Scope { owner: child, parent: node })
                 $.with(Owner=scope, Parent=scope, Track=box(NoTrack {})):

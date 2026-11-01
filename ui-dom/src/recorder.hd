@@ -1,11 +1,11 @@
 ## An hd `Surface` for tests and scripted runs: `apply!` logs every
 ## command, `next_event!` pops a scripted event, or handler 0 (stop) when
 ## the script is empty, and jobs queue in a list.
-use dep.ui.{DomCommand, UiEvent}
+use dep.ui.{Command, UiEvent}
 use pkg.surface.Surface
 
 pub struct Recorder:
-    pub log: List[DomCommand]
+    pub log: List[Command]
     pub events: List[UiEvent]
     ## Job ids posted and not yet taken. `next_job!` answers 0 when empty,
     ## so under the recorder a worker stops instead of waiting; `ui`'s
@@ -13,7 +13,7 @@ pub struct Recorder:
     pub jobs: List[usize]
 
 impl Surface for Recorder:
-    fn apply!(&mut self, commands: List[DomCommand]) -> void:
+    fn apply!(&mut self, commands: List[Command]) -> void:
         for command in commands:
             self.log.push(command)
 

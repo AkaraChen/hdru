@@ -1,12 +1,13 @@
 ## Input controls: each keeps a signal and a host control in step. The
 ## user's edit arrives as an event payload and is written into the signal;
-## a write from elsewhere is sent to the control as a `SetAttr`, except the
+## a write from elsewhere is sent to the control as a `SetProp`, except the
 ## value the control already shows, so a keystroke is never echoed back.
 use std.function.FnMut
 use dep.reactive.{Mutate, Owner, OwnerId, Reactive, Signal, Track, run_effect}
 use pkg.keys.{NodeId, Parent, Ui}
-use pkg.runtime.{built_last, create_node, emit, mark_built}
-use pkg.builders.listen
+use pkg.runtime.{built_last, emit, mark_built}
+use pkg.builders.{listen, styled_node}
+use pkg.style.Style
 
 # What the control shows now: the last value sent to it or typed into it.
 struct Shown:
@@ -15,11 +16,11 @@ struct Shown:
 ## A text field bound to `value`. Typing writes the field's text into
 ## `value` on each `input` event; writing `value` elsewhere, say clearing
 ## it after a submit, updates the field.
-pub fn input(value: Signal[string], class: string = "") -> void $ Ui:
+pub fn input(value: Signal[string], style: Style = Style::empty()) -> void $ Ui:
     owner := $.use(Owner).owner()
-    node := control($.use(Parent).parent(), "text", class)
     initial := value.peek()
-    emit(.SetAttr(node, "value", initial))
+    node := styled_node("input", style)
+    emit(.SetProp(node, "value", .Text(initial)))
     shown := box(Shown { text: initial })
     listen(
         owner,
@@ -34,18 +35,20 @@ pub fn input(value: Signal[string], class: string = "") -> void $ Ui:
         next := value.get()
         if next != shown.text:
             shown.text = next
-            emit(.SetAttr(node, "value", next))
+            emit(.SetProp(node, "value", .Text(next)))
         false
     follow_effect(owner, run)
     mark_built(node)
 
 ## A checkbox bound to `checked`, over the `change` event, whose payload
-## the host sends as `"true"` or `"false"`.
-pub fn checkbox(checked: Signal[bool], class: string = "") -> void $ Ui:
+## the host sends as `"true"` or `"false"`. Its kind is "checkbox" and its
+## state the `checked` flag, two additions to the vocabulary of
+## `rendering.md`.
+pub fn checkbox(checked: Signal[bool], style: Style = Style::empty()) -> void $ Ui:
     owner := $.use(Owner).owner()
-    node := control($.use(Parent).parent(), "checkbox", class)
     initial := checked.peek()
-    emit(.SetAttr(node, "checked", "$initial"))
+    node := styled_node("checkbox", style)
+    emit(.SetProp(node, "checked", .Flag(initial)))
     shown := box(Shown { text: "$initial" })
     listen(
         owner,
@@ -60,7 +63,7 @@ pub fn checkbox(checked: Signal[bool], class: string = "") -> void $ Ui:
         next := "${checked.get()}"
         if next != shown.text:
             shown.text = next
-            emit(.SetAttr(node, "checked", next))
+            emit(.SetProp(node, "checked", .Flag(next == "true")))
         false
     follow_effect(owner, run)
     mark_built(node)
@@ -79,14 +82,6 @@ pub fn checkbox(checked: Signal[bool], class: string = "") -> void $ Ui:
 ## ```
 pub fn on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Ui:
     listen($.use(Owner).owner(), built_last(), event, fn(payload: string) -> void $ Mutate: handler(payload))
-
-fn control(parent: NodeId, kind: string, class: string) -> NodeId:
-    node := create_node("input")
-    emit(.SetAttr(node, "type", kind))
-    if class != "":
-        emit(.SetAttr(node, "class", class))
-    emit(.Append(parent, node))
-    node
 
 # Runs `run` as an effect of `owner`, now and after each change.
 fn follow_effect[F < 'static & FnMut() -> bool $ Reactive](owner: OwnerId, mut run: F) -> void:

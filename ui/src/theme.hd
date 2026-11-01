@@ -1,0 +1,67 @@
+## Theme replaces the cascade (`rendering.md`, section 5). A component that
+## needs colors names `Theme` in its row, `$ Ui + Theme`, so a missing theme
+## is a compile error. The palette is a signal: read it with `peek` for a
+## static style, with `get` inside `style_live` to follow it, so dark mode
+## is one signal write.
+use dep.reactive.{ReadSignal, Signal}
+use pkg.protocol.{Color, rgb}
+
+## The colors a demo needs, by role.
+@derive(Eq, Debug)
+pub struct Palette:
+    ## Behind everything.
+    pub background: Color
+    ## Cards and controls.
+    pub surface: Color
+    ## Text on `background` or `surface`.
+    pub on_surface: Color
+    ## Secondary text.
+    pub muted: Color
+    ## Borders and dividers.
+    pub line: Color
+    ## The primary action.
+    pub accent: Color
+    ## Text on `accent`.
+    pub on_accent: Color
+
+impl Palette:
+    pub fn light() -> Palette:
+        Palette {
+            background: rgb(246, 247, 249),
+            surface: rgb(255, 255, 255),
+            on_surface: rgb(29, 35, 43),
+            muted: rgb(102, 113, 128),
+            line: rgb(217, 222, 229),
+            accent: rgb(47, 111, 219),
+            on_accent: rgb(255, 255, 255),
+        }
+
+    pub fn dark() -> Palette:
+        Palette {
+            background: rgb(20, 23, 28),
+            surface: rgb(29, 34, 41),
+            on_surface: rgb(228, 232, 238),
+            muted: rgb(150, 160, 173),
+            line: rgb(51, 59, 69),
+            accent: rgb(108, 156, 240),
+            on_accent: rgb(11, 18, 32),
+        }
+
+## The theme key: the palette signal of the subtree.
+pub trait Theme:
+    fn palette(self) -> ReadSignal[Palette]
+
+## The provider `provide_theme` installs.
+pub struct SignalTheme:
+    pub palette: ReadSignal[Palette]
+
+impl Theme for SignalTheme:
+    fn palette(self) -> ReadSignal[Palette]:
+        self.palette
+
+## Runs `body` with `palette` as its `Theme`; every other key of the
+## caller passes through. Writing `palette` restyles every `style_live`
+## that reads it.
+pub fn provide_theme[$R](palette: Signal[Palette], body: fn() -> void $ R + Theme) -> void $ R:
+    $.with(Theme=box(SignalTheme { palette: palette.read() })):
+        body()
