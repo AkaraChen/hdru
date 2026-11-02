@@ -18,8 +18,8 @@ use dep.ui.{
 use std.time.{Clock, ms}
 
 ## Pretends to fetch a profile: waits, then answers, or fails for id 13.
-fn fetch_profile!(clock: *mut dyn Clock, id: i32) -> Result[string, string]:
-    clock.sleep!(ms(400))
+fn fetch_profile!(id: i32) -> Result[string, string] $ Clock:
+    $.use(Clock).sleep!(ms(400))
     if id == 13: .Err("unlucky") else: .Ok("profile of user $id")
 
 fn describe(state: Resource[string, string]) -> string:
@@ -31,12 +31,15 @@ fn describe(state: Resource[string, string]) -> string:
 ## The profile of the user `id` names. Its row says it needs a clock, and
 ## it reads one from inside the `column:` of `app`: a builder's block runs
 ## under its caller's whole row. The loader runs later on a worker, so it
-## captures the clock lexically.
+## captures the clock lexically and installs it around `fetch_profile!`,
+## whose own row stays honest.
 fn profile(id: Signal[i32]) -> void $ Ui + Clock:
     let clock: *mut dyn Clock = $.use(Clock)
     loaded := resource(
         fn(): id.get(),
-        fn!(key: i32) -> Result[string, string]: fetch_profile!(clock, key)
+        fn!(key: i32) -> Result[string, string]:
+            $.with(Clock=clock):
+                fetch_profile!(key)
         ,
     )
     p := Palette::light()

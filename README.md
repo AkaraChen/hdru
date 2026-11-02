@@ -55,7 +55,8 @@ A `resource` loads a value with a suspending function whenever its key
 changes; the load runs on one of `run_app!`'s worker tasks while the
 event loop keeps serving clicks. The loader captures any provider it
 needs lexically, `let clock: *mut dyn Clock = $.use(Clock)` before the
-`fn!`, because its row is empty. `resource_with(key, load, policy)` wraps
+`fn!`, because its row is empty, and installs it with `$.with` around the
+functions it calls (`docs/design.md`, "Keys in retained callbacks"). `resource_with(key, load, policy)` wraps
 each load in a `std.task` policy such as `timeout(ms(5000))` or
 `retry(Backoff {})`.
 
