@@ -121,7 +121,7 @@ The one idea, `$.with`, also covers the rest:
 
 - A `Mutate` that logs is how `last_writes()` reports what a click wrote.
 - A `Mutate` that panics is `assert_no_writes`.
-- A `Surface` that records is `Recorder`, which runs the whole event loop in a test with no JavaScript.
+- A `Renderer` that records is `Recorder`, which runs the whole event loop in a test with no JavaScript.
 - A `Clock` you control makes time-based tests instant.
 
 ## Lists, conditions and inputs
@@ -213,7 +213,7 @@ pub fn main!() -> void $ Surface:
   ╰──────────────────────────────────────╯
 ```
 
-A renderer is two host methods, `apply!` and `next_event!`. The terminal one was added without changing a
+A renderer is two methods, `apply!` and `next_event!`, and `ui` holds the loop that drives them. The terminal one was added without changing a
 line of `reactive` or `ui`. In a terminal, Tab and Shift-Tab move the focus, Enter and Space click, a left
 press focuses and clicks, typing edits a focused field, Space toggles a checkbox, and `q` (outside a field)
 or Ctrl-C quits.
@@ -263,6 +263,7 @@ cd examples/todos && hd run todos-tui
 | a terminal app driven by keys, printing plain frames | `cd examples/counter && printf '\t\rq' \| hd run counter-tui` |
 | an example under Node, DOM provider, scripted clicks | `cd examples/counter && UI_CLICKS=2,2,1 hd run counter --engine node` |
 | the todos example, typing "milk" and pressing Enter | `cd examples/todos && UI_CLICKS=1,8=milk,10 hd run todos --engine node` |
+| the playground | `node web/playground/build.mjs`, then serve `web/playground/dist/`; needs the `hd_web` package goal in `../hd-lang` |
 | the browser pages | `./web/build.sh`, then serve `web/` (for example `python3 -m http.server -d web 8765`) and open `index.html`, `todos.html` or `fetcher.html` |
 
 Run `hd check` after `hd fmt`, which can still produce code the parser rejects
@@ -273,11 +274,12 @@ Run `hd check` after `hd fmt`, which can still produce code the parser rejects
 | Package | What it holds |
 | --- | --- |
 | `reactive/` | signals, memos, effects, owners, context; no nodes and no host |
-| `ui/` | the `Ui` row, builders, `show`, `for_each`, inputs, resources, `Style`, `Theme`, the command protocol |
-| `ui-dom/` | the browser renderer: the `Surface` host trait, `run_app!`, `Recorder`, the JavaScript provider |
-| `ui-tui/` | the terminal renderer, the same shape on Node |
+| `ui/` | the `Ui` row, builders, `show`, `for_each`, inputs, resources, `Style`, `Theme`, the command protocol, the `Renderer` trait and its loop, `Recorder` |
+| `ui-dom/` | the browser renderer: the `Surface` host trait, `run_app!`, the JavaScript provider, and what only the DOM has (`attr`, `dom_class`, `dom_on`, `textarea`) |
+| `ui-tui/` | the terminal renderer: the `Surface` host trait, `run_app!`, the JavaScript provider |
+| `playground/` | an hdru playground written in hdru, DOM-only |
 | `examples/` | `counter`, `todos` and `fetcher`, each with its app in `src/lib.hd` and an entry per renderer |
-| `web/` | browser pages for the examples |
+| `web/` | browser pages for the examples and the playground |
 
 An app depends on `ui` and a renderer, and consents to the renderer's host trait in its manifest, such as
 `"dep.ui_dom.surface.Surface" = true`.

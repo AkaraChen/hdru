@@ -1,8 +1,5 @@
-## The terminal renderer for `ui`: the `Surface` host trait, `run_app!` with
-## its event loop and worker pool, the JavaScript provider in
-## `providers/tui.mjs`, and `Recorder`, an hd `Surface` for tests. The same
-## shape as `ui-dom`: one trait, one provider file and one loop per renderer
-## (`docs/packages.md`).
+## The terminal renderer for `ui`: the `Surface` host trait, `run_app!` on it,
+## and the JavaScript provider in `providers/tui.mjs`. The same shape as
+## `ui-dom`: one trait and one provider file per renderer (`docs/packages.md`).
 pub use pkg.surface.{Surface}
 pub use pkg.app.{run_app}
-pub use pkg.recorder.{Recorder, scripted}

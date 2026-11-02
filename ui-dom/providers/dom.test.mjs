@@ -233,3 +233,33 @@ test("the DOM tree applies kinds, style keys, dom: keys and control values", () 
     delete globalThis.document;
   }
 });
+
+test("the DOM tree routes portable and dom: events, and drops an unknown one", () => {
+  globalThis.document = { createElement: (tag) => new FakeElement(tag) };
+  const nodes = new Map();
+  const warnings = [];
+  try {
+    const surface = createDomSurface(new FakeElement("main"), nodes, (line) => warnings.push(line), quiet);
+    const listened = [];
+    surface.apply([command("Create", { node: 1, kind: "dom:textarea" })]);
+    const element = nodes.get(1);
+    assert.equal(element.tag, "textarea");
+    element.addEventListener = (name, listener) => listened.push([name, listener]);
+    surface.apply([
+      command("Listen", { node: 1, event: "input", handler: 1 }),
+      command("Listen", { node: 1, event: "dom:theme-change", handler: 2 }),
+      command("Listen", { node: 1, event: "blur", handler: 3 }),
+    ]);
+    assert.deepEqual(listened.map(([name]) => name), ["input", "theme-change"]);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /event blur/);
+    // A CustomEvent's string detail is the payload of a dom: event.
+    listened[1][1]({ detail: "dark", target: { value: "no" } });
+    assert.deepEqual(surface.next_event(), { handler: 2, payload: "dark" });
+    // A portable event's payload is the target's value, whatever its detail.
+    listened[0][1]({ detail: 1, target: { value: "typed" } });
+    assert.deepEqual(surface.next_event(), { handler: 1, payload: "typed" });
+  } finally {
+    delete globalThis.document;
+  }
+});

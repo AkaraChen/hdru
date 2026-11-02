@@ -11,8 +11,9 @@ hdru/
   ui/          layer 2 types and layer 3 vocabulary
   ui-dom/      the DOM renderer: host trait, loop, provider
   ui-tui/      the terminal renderer: the same shape on Node
+  playground/  a DOM-only app: edit, check and run hdru programs in the browser
   examples/    counter, todos, fetcher: apps on either renderer
-  web/         browser pages for the examples
+  web/         browser pages for the examples and the playground
   docs/
 ```
 
@@ -36,14 +37,15 @@ hdru/
 | Package | Key | Holds | Host trait |
 | --- | --- | --- | --- |
 | `reactive` | `dep.reactive` | the `Owner`, `Track` and `Mutate` keys and the `Reactive` alias, the graph, `signal`, `memo`, `effect`, `sync`, `batch`, `untrack`, owners (`root`, `owned`, `on_cleanup`), `given`/`use_given`, `provide`/`use_context` | none |
-| `ui` | `dep.ui` | the `Parent` key and `type Ui = $ Owner + Parent`; `Command`, `PropValue`, `Color`, `Size`, `UiEvent`; `Style`; `Theme`; builders, `show`, `for_each`, inputs, `resource`; `mount`, `dispatch`, `take_commands`, `run_job!`. Re-exports `reactive`'s user-facing names | none |
-| `ui-dom` | `dep.ui_dom` | `surface.hd` (`@host trait Surface`), `app.hd` (`run_app!`), `recorder.hd` (`Recorder`, `scripted`), `providers/dom.mjs` and its Node test | `surface.Surface` → `providers/dom.mjs` |
-| `ui-tui` | `dep.ui_tui` | the same three files, `providers/tui.mjs` and its Node test | `surface.Surface` → `providers/tui.mjs` |
+| `ui` | `dep.ui` | the `Parent` key and `type Ui = $ Owner + Parent`; `Command`, `PropValue`, `Color`, `Size`, `UiEvent`; `Style`; `Theme`; builders, `show`, `for_each`, inputs, `resource`; `mount`, `dispatch`, `take_commands`; the `Renderer` trait, the loop `run_on!`, and `Recorder`, `scripted`; `prop`, `prop_live`, `Style.host_prop`, `text_field` for a renderer's own words. Re-exports `reactive`'s user-facing names | none |
+| `ui-dom` | `dep.ui_dom` | `surface.hd` (`@host trait Surface`), `app.hd` (`run_app!`, the adapter to `Renderer`), `dom.hd` (`attr`, `attr_live`, `DomStyle`, `dom_on`, `textarea`), `providers/dom.mjs` and its Node test | `surface.Surface` → `providers/dom.mjs` |
+| `ui-tui` | `dep.ui_tui` | `surface.hd`, `app.hd`, `providers/tui.mjs` and its Node test | `surface.Surface` → `providers/tui.mjs` |
+| `playground` | | the shell in `src/lib.hd`, its `@host trait Workbench`, and `providers/`: the compiler's wire format and the worker and iframe | `workbench.Workbench` → `providers/workbench.mjs` |
 | `examples/*` | | an app in `src/lib.hd`, with entries `src/main.hd` (DOM) and `src/tui.hd` (terminal) | |
 
-A renderer's `app.hd` and `recorder.hd` are per-renderer on purpose: the loop is the suspending glue, and the
-recorder implements that package's trait. `Recorder` is not the core's: core tests use `mount`, `dispatch` and
-`take_commands`, which need no host.
+The loop and `Recorder` are in `ui` because they depend only on the protocol. A host trait is per package, since one
+trait maps to one provider file, so each renderer's `app.hd` is a small adapter from its `Surface` to `Renderer`.
+Tests of the loop run in `ui` on a `Recorder`, with no host; each renderer tests only its adapter.
 
 ### `reactive`'s low-level API
 
@@ -71,7 +73,7 @@ dependencies are not visible: `use dep.reactive` without a direct requirement is
 ```toml
 # hd.toml
 [workspace]
-members = ["reactive", "ui", "ui-dom", "ui-tui", "examples/counter", "examples/todos", "examples/fetcher"]
+members = ["reactive", "ui", "ui-dom", "ui-tui", "playground", "examples/counter", "examples/todos", "examples/fetcher"]
 ```
 
 ```toml
@@ -135,3 +137,4 @@ module = "tui"
 | an app in the terminal | `hd run -p counter counter-tui`, from anywhere in the tree |
 | an app under Node, DOM provider | `cd examples/counter && UI_CLICKS=2,2,1 hd run counter --engine node` |
 | the browser pages | `./web/build.sh`, which takes the provider from `ui-dom/providers/dom.mjs` |
+| the playground | `node web/playground/build.mjs`, then serve `web/playground/dist/` |

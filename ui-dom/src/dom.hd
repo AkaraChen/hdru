@@ -1,0 +1,42 @@
+## The words only the DOM has. Each lowers to a `dom:` key, kind or event, which
+## other renderers ignore, so code that reaches past the portable vocabulary
+## shows it in its imports (`rendering.md`).
+use std.function.{Fn, FnMut}
+use dep.ui.{Mutate, PropValue, Signal, Style, Track, Ui, on, prop, prop_live, text_field}
+
+## `dom_class`, as a chain method on `ui`'s `Style`.
+pub trait DomStyle:
+    ## Sets the element's `class` attribute.
+    fn dom_class(self, value: string) -> Style
+
+impl DomStyle for Style:
+    fn dom_class(self, value: string) -> Style:
+        self.host_prop("dom:class", .Text(value))
+
+## Sets a DOM attribute on `last_node()`: on a container once its block has run,
+## or from inside the block on the child built last.
+##
+## ```hd
+## use dep.ui.{Ui, column, text}
+## use pkg.attr
+## fn page() -> void $ Ui:
+##     column:
+##         text("hi")
+##         attr("title", "greeting")
+##     attr("id", "main")
+## ```
+pub fn attr(name: string, value: string) -> void $ Ui:
+    prop("dom:attr:$name", .Text(value))
+
+## A DOM attribute of `last_node()` that follows the signals `compute` reads.
+pub fn attr_live[F < 'static & Fn() -> string $ Track](name: string, compute: F) -> void $ Ui:
+    prop_live("dom:attr:$name", compute)
+
+## Calls `handler` when the DOM event `event` fires on `last_node()`. The
+## payload is a `CustomEvent`'s string `detail`, else the target's value.
+pub fn dom_on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Ui:
+    on("dom:$event", fn(payload: string) -> void $ Mutate: handler(payload))
+
+## A multi-line text field bound to `value`, as `ui`'s `input` is.
+pub fn textarea(value: Signal[string], style: Style = Style::empty()) -> void $ Ui:
+    text_field("dom:textarea", value, style)

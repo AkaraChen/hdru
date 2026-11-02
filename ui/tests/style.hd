@@ -2,20 +2,22 @@ use pkg.{
     Command,
     Mutate,
     Palette,
+    PropValue,
     Signal,
     Size,
     Style,
     Theme,
     Ui,
     UiEvent,
-    attr,
-    attr_live,
     button,
     column,
     diff,
     dispatch,
     last_node,
+    lower,
     mount,
+    prop,
+    prop_live,
     provide_theme,
     reset_for_test,
     rgb,
@@ -80,7 +82,7 @@ it("view sets no direction; column and row override one"):
 it("text and button take a style; without one they emit no SetProp"):
     reset_for_test()
     _ := mount:
-        text("hi", style=Style::empty().font_size(18.0).dom_class("lead"))
+        text("hi", style=Style::empty().font_size(18.0).host_prop("dom:class", .Text("lead")))
         button("go", fn() -> void $ Mutate: pass, style=Style::empty().cursor(.Pointer))
         text("plain")
     assert_equal(
@@ -100,7 +102,7 @@ it("text and button take a style; without one they emit no SetProp"):
             .Append(0, 3),
             .SetText(3, "plain"),
         ],
-        reason="the dom: key is spelled out where it is used",
+        reason="a renderer's key is spelled out where it is used",
     )
 
 it("diff gives changed keys, Unset for a key that went unset, nothing for equal"):
@@ -137,17 +139,17 @@ it("style_live restyles the enclosing container by key"):
     assert_equal(click(2), [], reason="an equal style emits nothing")
     assert_equal(click(1), [.SetProp(1, "opacity", .Unset)], reason="a key that went unset")
 
-it("attr and attr_live lower to dom:attr keys on the last node"):
+it("prop and prop_live set a key on the last node"):
     reset_for_test()
     _ := mount:
         level := signal(+1)
         column:
             text("a")
-            attr("title", "first")
-        attr("id", "main")
+            prop("x:title", .Text("first"))
+        prop("x:id", .Text("main"))
         text("meter")
-        attr_live(
-            "data-level",
+        prop_live(
+            "x:level",
             fn():
                 if level.get() > 2: "high" else: "low"
             ,
@@ -159,11 +161,21 @@ it("attr and attr_live lower to dom:attr keys on the last node"):
             ,
         )
     commands := take_commands()
-    assert_equal(commands.contains(.SetProp(2, "dom:attr:title", .Text("first"))), true, reason="the text inside")
-    assert_equal(commands.contains(.SetProp(1, "dom:attr:id", .Text("main"))), true, reason="the column, after its block")
-    assert_equal(commands.contains(.SetProp(3, "dom:attr:data-level", .Text("low"))), true, reason="the first value")
+    assert_equal(commands.contains(.SetProp(2, "x:title", .Text("first"))), true, reason="the text inside")
+    assert_equal(commands.contains(.SetProp(1, "x:id", .Text("main"))), true, reason="the column, after its block")
+    assert_equal(commands.contains(.SetProp(3, "x:level", .Text("low"))), true, reason="the first value")
     assert_equal(click(1), [], reason="2 is still low: no command")
-    assert_equal(click(1), [.SetProp(3, "dom:attr:data-level", .Text("high"))], reason="3 is high: one SetProp")
+    assert_equal(click(1), [.SetProp(3, "x:level", .Text("high"))], reason="3 is high: one SetProp")
+
+it("host props lower after the portable keys, replace by key, and diff by key"):
+    a := Style::empty().gap(1.0).host_prop("x:a", .Text("1")).host_prop("x:b", .Text("2"))
+    assert_equal(lower(a), [("gap", PropValue.Number(1.0)), ("x:a", PropValue.Text("1")), ("x:b", PropValue.Text("2"))], reason="lower")
+    replaced := a.host_prop("x:a", .Text("9"))
+    assert_equal(diff(a, replaced), [("x:a", PropValue.Text("9"))], reason="one changed")
+    dropped := Style::empty().gap(1.0).host_prop("x:b", .Text("2"))
+    assert_equal(diff(a, dropped), [("x:a", PropValue.Unset)], reason="one gone")
+    assert_equal(diff(a, a), [], reason="equal")
+    assert_equal(lower(Style::empty().host_prop("x:a", .Text("1")).merge(Style::empty().host_prop("x:a", .Text("2")))), [("x:a", PropValue.Text("2"))], reason="merge")
 
 it("last_node names the container after its block has run"):
     reset_for_test()

@@ -13,8 +13,17 @@ library has the same shape:
 | Layer | React | Solid | Here | Package |
 | --- | --- | --- | --- | --- |
 | 1 Reactive core | reconciler, Fiber | signals, owners | `graph.hd`, `reactive.hd`, `owner.hd` | `reactive` |
-| 2 Renderer protocol | host config | `createRenderer` table | the `Command` stream | types in `ui`; the `@host` trait and loop in each renderer (`ui-dom`, `ui-tui`) |
-| 3 Vocabulary | `div` vs `View` | `solid-js/web` | node kinds, events and property keys, typed by `Style` | `ui` |
+| 2 Renderer protocol | host config | `createRenderer` table | the `Command` stream, the `Renderer` trait and the loop on it | `ui`; each renderer package adapts its `@host` trait to `Renderer` |
+| 3 Vocabulary | `div` vs `View` | `solid-js/web` | node kinds, events and property keys, typed by `Style` | `ui` for the portable words; a renderer package for its own, with its prefix |
+
+**What goes where.** Ask what a thing depends on:
+
+- Nothing about nodes: `reactive`.
+- The protocol, and a meaning every renderer can give it: `ui`. Its rules come from that meaning, not from any
+  platform: an `input` holds a value, so it has no children on any renderer.
+- One platform: that renderer's package, as a `dom:` key, kind or event reached through words such as `attr`,
+  `dom_class`, `dom_on` and `textarea`. So `ui` matches no HTML standard; `ui-dom` maps `ui` onto it.
+- One program: the app, as the playground's `Workbench` is.
 
 **Layer 2 carries no vocabulary.** Kinds, event names and property keys are data, so
 adding a property touches `Style` and the renderers that want it, never the host trait.
@@ -52,10 +61,11 @@ A host answers with `UiEvent { handler, payload }`. Handler 0 ends the loop.
   `{ tag: "Px", fields: { value: 8 } }`, and an optional is a value or `null`.
 - **`PropValue` is typed** so that a renderer in any language never parses `"8px"` or
   `"#336699"`. `Color` and `Size` are the only structured values every renderer needs.
-- **Key namespaces.** A key without a prefix is portable. A key with a renderer prefix
-  belongs to that renderer and is ignored by the others: `dom:class`,
-  `dom:attr:aria-label`. This replaces a raw command and makes non-portable code visible
-  at the call site.
+- **Namespaces.** A property key, node kind or event without a prefix is portable. One with
+  a renderer prefix belongs to that renderer and is ignored by the others: `dom:class`,
+  `dom:attr:aria-label`, `dom:textarea`, `dom:focus`. This replaces a raw command. `ui` emits
+  none of them itself: it offers `prop`, `prop_live`, `Style.host_prop` and `text_field`, and a
+  renderer package builds its words on those, so non-portable code shows in its imports.
 - **Numbers are `f32` logical pixels**, and each renderer applies its own scale.
 
 ## Layer 3: the vocabulary
@@ -74,6 +84,7 @@ grid, absolute positioning, transforms, animation, shadows, pseudo-states.
 | `input` | `input type=text` | a field with a cursor | `value` property |
 | `checkbox` | `input type=checkbox` | `[x]` / `[ ]` | `checked` property |
 | `fragment` | `div`, `display: contents` | no box at all | groups without layout; `show` and `for_each` render into one |
+| `dom:textarea` | `textarea` | a box | multi-line field, `value` property and `input` events; `ui-dom`'s `textarea` |
 
 `button` and `input` stay kinds, not boxes with a `role` key: both renderers draw them
 differently from a box, and a key would carry the same switch with less checking. An
@@ -89,7 +100,9 @@ unknown kind renders as `box`.
 | `key` | the key name, as `KeyboardEvent.key` | `keydown` | any key on the focus but Tab, Shift-Tab and the quit keys |
 | `enter` | the field's text | `keydown` of Enter | Enter in a focused field |
 
-Events bubble to ancestors' listeners on both renderers.
+Events bubble to ancestors' listeners on both renderers. `ui-dom`'s `dom_on` reaches the DOM's own events as
+`dom:<name>`, with a `CustomEvent`'s string `detail` as the payload. The terminal ignores those, so such a
+listener does not make a node take the focus, and the DOM logs and ignores an unknown event with no prefix.
 
 ### Properties
 
@@ -153,7 +166,8 @@ column(style=Style::empty().gap(8.0).padding(12.0).bg(theme.surface)):
   equal style. Its first run compares with an empty style, so give a key a static or a live
   value, not both, or `Unset` can remove the static one.
 - `column` and `row` are `view` with `direction` set, always emitted.
-- `Style.dom_class` and `attr` / `attr_live` reach the `dom:` keys.
+- `ui-dom`'s `DomStyle` adds a `dom_class` chain method to `Style`, and its `attr` / `attr_live` set attributes.
+  Importing them is what makes a component DOM-only.
 
 ## Theme instead of a cascade
 
@@ -176,9 +190,9 @@ inside `style_live` follows the signal, so dark mode is one write.
 
 ## What a renderer implements
 
-A package with its own `@host trait Surface` (one trait maps to one provider file), its own
-`run_app!` and `Recorder`, and a provider that keeps a node table, implements the eight commands,
-and follows the kind and key tables as far as it can. A provider is a plain object with `apply`
+A package with its own `@host trait Surface` (one trait maps to one provider file), a `run_app!`
+that adapts it to `ui`'s `Renderer` and calls `run_on!`, and a provider that keeps a node table,
+implements the eight commands, and follows the kind and key tables as far as it can. A provider is a plain object with `apply`
 and `next_event`. Suspending methods may return a value or a Promise, and each method also receives a context whose `instanceSignal` aborts when the program ends.
 
 ## The DOM provider

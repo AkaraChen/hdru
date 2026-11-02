@@ -197,25 +197,16 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
 pub fn last_node() -> NodeId $ Ui:
     built_last()
 
-## Sets a DOM attribute on `last_node()`, the escape hatch for what the
-## portable vocabulary lacks. It lowers to the `dom:`-prefixed key
-## `dom:attr:<name>`, which other renderers ignore:
-##
-## ```hd
-## use pkg.{Ui, attr, column, text}
-## fn view() -> void $ Ui:
-##     column:
-##         text("hi")
-##         attr("title", "greeting")
-##     attr("id", "main")
-## ```
-pub fn attr(name: string, value: string) -> void $ Ui:
-    emit(.SetProp(last_node(), "dom:attr:$name", .Text(value)))
+## Sets one property on `last_node()` by key: how a renderer package adds
+## words the portable vocabulary lacks, as `ui-dom`'s `attr` does. An app sets
+## properties through `Style`.
+pub fn prop(key: string, value: PropValue) -> void $ Ui:
+    emit(.SetProp(last_node(), key, value))
 
-## A DOM attribute of `last_node()` that follows the signals `compute`
-## reads, as `text_live` does for text: one `SetProp` per change and none
-## for an equal value.
-pub fn attr_live[F < 'static & Fn() -> string $ Track](name: string, compute: F) -> void $ Ui:
+## A text property of `last_node()` that follows the signals `compute` reads,
+## as `text_live` does for text: one `SetProp` per change and none for an
+## equal value.
+pub fn prop_live[F < 'static & Fn() -> string $ Track](key: string, compute: F) -> void $ Ui:
     owner := $.use(Owner).owner()
     node := last_node()
-    follow(owner, compute, fn(next: string) -> void: emit(.SetProp(node, "dom:attr:$name", .Text(next))))
+    follow(owner, compute, fn(next: string) -> void: emit(.SetProp(node, key, .Text(next))))

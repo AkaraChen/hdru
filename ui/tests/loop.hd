@@ -1,0 +1,218 @@
+use pkg.{
+    Style,
+    Command,
+    Mutate,
+    Recorder,
+    Renderer,
+    Track,
+    Resource,
+    Ui,
+    UiEvent,
+    button,
+    checkbox,
+    column,
+    input,
+    on,
+    reset_for_test,
+    run_on,
+    scripted,
+    resource,
+    row,
+    signal,
+    sync,
+    text_live,
+}
+use std.testing.assert_equal
+use std.time.{Clock, ManualClock, Timestamp, ms}
+
+fn counter() -> void $ Ui:
+    count := signal(+0)
+    column:
+        text_live:
+            "Count: ${count.get()}"
+        row:
+            button(
+                "-",
+                fn():
+                    count.update(fn(n): n - 1)
+                ,
+            )
+            button(
+                "+",
+                fn():
+                    count.update(fn(n): n + 1)
+                ,
+            )
+
+it("run_on drives the counter through a scripted renderer and stops on handler 0"):
+    reset_for_test()
+    recorder := scripted([2, 2, 1, 7])
+    $.with(Renderer=recorder):
+        run_on!(counter)
+    log := recorder.log
+    assert_equal(log.len(), 20, reason="17 mount commands and 3 updates")
+    assert_equal(log.get(0).copied(), .Some(Command.Create(1, "box")), reason="mount first")
+    assert_equal(log.get(17).copied(), .Some(Command.SetText(2, "Count: 1")), reason="first plus")
+    assert_equal(log.get(18).copied(), .Some(Command.SetText(2, "Count: 2")), reason="second plus")
+    assert_equal(
+        log.get(19).copied(),
+        .Some(Command.SetText(2, "Count: 1")),
+        reason="minus; the unknown handler 7 emitted nothing",
+    )
+    assert_equal(recorder.events, [], reason="every scripted event was consumed")
+
+fn describe(state: Resource[string, string]) -> string:
+    match state:
+        .Loading => "loading"
+        .Ready(value) => "ready: $value"
+        .Failed(error) => "failed: $error"
+
+fn slow_profile() -> void $ Ui + Clock:
+    let clock: *mut dyn Clock = $.use(Clock)
+    id := signal(+7)
+    user := resource(
+        fn(): id.get(),
+        fn!(key: i32) -> Result[string, string]:
+            clock.sleep!(ms(50))
+            .Ok("slow user $key")
+        ,
+    )
+    text_live:
+        describe(user.get())
+
+it("a loader that suspends lands through the workers of run_on"):
+    reset_for_test()
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Renderer=recorder):
+        run_on!(slow_profile)
+    log := recorder.log
+    assert_equal(log.get(2).copied(), .Some(Command.SetText(1, "loading")), reason="mount")
+    assert_equal(
+        log.get(3).copied(),
+        .Some(Command.SetText(1, "ready: slow user 7")),
+        reason="a worker drove the sleeping loader and sent its landing",
+    )
+    assert_equal(log.len(), 4, reason="nothing else")
+
+fn form() -> void $ Ui:
+    draft := signal("hello")
+    column:
+        input(draft, style=Style::empty().grow(1.0))
+        on(
+            "enter",
+            fn(text: string) -> void $ Mutate:
+                draft.set("")
+            ,
+        )
+        text_live:
+            "draft: ${draft.get()}"
+        button("clear", fn(): draft.set(""))
+        button("fill", fn(): draft.set("filled"))
+
+it("run_on carries payloads from the renderer to the handler"):
+    reset_for_test()
+    recorder := box(
+        Recorder {
+            log: [],
+            events: [
+                UiEvent { handler: 1, payload: "h" },
+                UiEvent { handler: 1, payload: "hi" },
+                UiEvent { handler: 2, payload: "hi" },
+            ],
+        },
+    )
+    $.with(Renderer=recorder):
+        run_on!(form)
+    log := recorder.log
+    assert_equal(log.len(), 24, reason="20 mount commands, then 1, 1 and 2")
+    assert_equal(log.get(20).copied(), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
+    assert_equal(log.get(21).copied(), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
+    assert_equal(log.get(22).copied(), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
+
+fn agree() -> void $ Ui:
+    accepted := signal(false)
+    column:
+        checkbox(accepted)
+        text_live:
+            if accepted.get(): "accepted" else: "not yet"
+
+it("run_on carries a checkbox's change payload, as the provider sends it"):
+    reset_for_test()
+    recorder := box(
+        Recorder {
+            log: [],
+            events: [
+                UiEvent { handler: 1, payload: "true" },
+                UiEvent { handler: 1, payload: "false" },
+            ],
+        },
+    )
+    $.with(Renderer=recorder):
+        run_on!(agree)
+    log := recorder.log
+    assert_equal(log.len(), 12, reason="10 mount commands and one text per change")
+    assert_equal(log.get(10).copied(), .Some(Command.SetText(3, "accepted")), reason="space ticks it")
+    assert_equal(log.get(11).copied(), .Some(Command.SetText(3, "not yet")), reason="space unticks it")
+
+fn chain() -> void $ Ui + Clock:
+    let clock: *mut dyn Clock = $.use(Clock)
+    next := signal(+0)
+    rows := resource(
+        fn(): next.get(),
+        fn!(key: i32) -> Result[i32, string]:
+            clock.sleep!(ms(1))
+            .Ok(key)
+        ,
+    )
+    # A load that lands leads to the next one, from inside a worker's send.
+    sync(fn() -> void $ Track + Mutate:
+        match rows.get():
+            .Ready(key) =>
+                if key < 40:
+                    next.set(key + 1)
+            _ => pass
+    )
+    text_live:
+        match rows.get():
+            .Ready(key) => "at $key"
+            _ => "loading"
+
+it("loads that lead to loads all land, after the loop has stopped, with no deadlock"):
+    reset_for_test()
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Renderer=recorder):
+        run_on!(chain)
+    assert_equal(recorder.log.last().copied(), .Some(Command.SetText(1, "at 40")), reason="the chain ran to its end")
+
+fn crowd() -> void $ Ui + Clock:
+    let clock: *mut dyn Clock = $.use(Clock)
+    column:
+        for index in 0..20:
+            load := resource(
+                fn(): index,
+                fn!(key: usize) -> Result[usize, string]:
+                    clock.sleep!(ms(1))
+                    .Ok(key)
+                ,
+            )
+            text_live:
+                match load.get():
+                    .Ready(key) => "done $key"
+                    _ => "loading"
+
+it("more loads than workers all land"):
+    reset_for_test()
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Renderer=recorder):
+        run_on!(crowd)
+    let mut done = 0
+    for command in recorder.log:
+        match command:
+            .SetText(_, text) =>
+                if text.starts_with("done"):
+                    done += 1
+            _ => pass
+    assert_equal(done, 20, reason="every load landed")

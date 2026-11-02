@@ -1,3 +1,4 @@
+use pkg.runtime.{run_job, take_new_jobs}
 use pkg.{
     Command,
     Resource,
@@ -5,10 +6,8 @@ use pkg.{
     mount,
     reset_for_test,
     resource_with,
-    run_job,
     signal,
     take_commands,
-    take_new_jobs,
     text_live,
 }
 use std.convert.From

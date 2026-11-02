@@ -17,9 +17,15 @@ struct Shown:
 ## `value` on each `input` event; writing `value` elsewhere, say clearing
 ## it after a submit, updates the field.
 pub fn input(value: Signal[string], style: Style = Style::empty()) -> void $ Ui:
+    text_field("input", value, style)
+
+## A field of `kind` bound to `value`, for a renderer package's own kinds of
+## field, as `ui-dom`'s `textarea`. The kind takes the `value` property and sends
+## `input` events.
+pub fn text_field(kind: string, value: Signal[string], style: Style) -> void $ Ui:
     owner := $.use(Owner).owner()
     initial := value.peek()
-    node := styled_node("input", style)
+    node := styled_node(kind, style)
     emit(.SetProp(node, "value", .Text(initial)))
     shown := box(Shown { text: initial })
     listen(
@@ -69,9 +75,9 @@ pub fn checkbox(checked: Signal[bool], style: Style = Style::empty()) -> void $ 
     mark_built(node)
 
 ## Calls `handler` with the event's payload whenever `event` fires on
-## `last_node()`. Besides the DOM's own event names, the provider sends
-## `"enter"` when Enter is pressed in a field, with the field's text as
-## the payload:
+## `last_node()`. The portable events are `click`, `input`, `change`, `key` and
+## `enter` (`rendering.md`); a renderer prefix names that renderer's own. Enter
+## in a field sends `enter`, with the field's text as the payload:
 ##
 ## ```hd
 ## use pkg.{Mutate, Ui, input, on, signal}

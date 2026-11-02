@@ -194,6 +194,9 @@ export function createTree() {
         else node(f.node).props.set(f.key, f.value);
         break;
       case "Listen": {
+        // A prefixed event belongs to another renderer. Listening would also
+        // make the node take the focus.
+        if (f.event.includes(":")) break;
         const n = node(f.node);
         if (!n.listeners.has(f.event)) n.listeners.set(f.event, []);
         n.listeners.get(f.event).push(f.handler);

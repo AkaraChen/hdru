@@ -1,0 +1,110 @@
+## What every renderer shares: the contract it implements, and the loop that
+## runs a tree on it: mount, send each batch of commands, dispatch each event,
+## and run resource loads on a pool of worker tasks. None of it depends on a
+## host, so a renderer package only adapts its `@host` trait to `Renderer`.
+## `Recorder` implements it in hd, so the whole loop runs in a test.
+use std.task.{Receiver, Sender, channel, join, map_join}
+use dep.reactive.OwnerId
+use pkg.keys.Ui
+use pkg.protocol.{Command, UiEvent}
+use pkg.runtime.{dispatch, mount, run_job, take_commands, take_new_jobs}
+
+## What a renderer does. `apply!` consumes one batch of commands and
+## `next_event!` waits for the next user event; a handler of 0 ends the loop.
+pub trait Renderer:
+    fn apply!(&mut self, commands: List[Command]) -> void
+    fn next_event!(&mut self) -> UiEvent
+
+# At most this many loads are in flight at once.
+WORKERS := 4
+
+# Jobs wait in a plain list and the channel only wakes workers. If the channel
+# held the jobs, its capacity would be a trap: a worker sends the jobs its own
+# load made, so with the channel full every worker could wait on `send!` at
+# once and the program would die of `suspension-deadlock`. Here a token is sent
+# only for a worker counted idle, so the tokens never outnumber the capacity
+# and `send!` never waits.
+struct Pool:
+    jobs: List[usize]
+    ## Workers waiting for a token, less the tokens already sent to them.
+    idle: usize
+    closed: bool
+    wake: Sender[void]
+    woken: Receiver[void]
+
+# Sends the queued commands, then hands over the jobs registered since.
+fn send!(pool: *mut Pool) -> void $ Renderer:
+    commands := take_commands()
+    if !commands.is_empty():
+        $.use(Renderer).apply!(commands)
+    for id in take_new_jobs():
+        pool.jobs.push(id)
+        if !pool.closed && pool.idle > 0:
+            pool.idle -= 1
+            pool.wake.send!(())
+
+fn event_loop!(pool: *mut Pool) -> void $ Renderer:
+    while true:
+        event := $.use(Renderer).next_event!()
+        if event.handler == 0:
+            break
+        dispatch(event)
+        send!(pool)
+    pool.closed = true
+    pool.wake.close()
+
+# Works until the loop has ended and no job is left, so a load in flight at
+# shutdown still lands, and so do any loads it leads to.
+fn worker!(pool: *mut Pool) -> void $ Renderer:
+    while true:
+        if !pool.jobs.is_empty():
+            run_job!(pool.jobs.remove_at(0))
+            send!(pool)
+        else if pool.closed:
+            break
+        else:
+            pool.idle += 1
+            _ := pool.woken.recv!()
+
+## Mounts `root`, sends its commands, then runs the event loop beside a
+## pool of workers until the host sends handler 0: each event is
+## dispatched and its changes sent; each resource load runs on a worker
+## and lands its result when the loader completes. Returns when the loop
+## has ended and every worker has stopped.
+pub fn run_on![$ R](root: fn() -> void $ Ui + R) -> void $ Renderer + R:
+    _ := mount(root)
+    let (wake, woken) = channel::[void](capacity=WORKERS)
+    pool := box(Pool { jobs: [], idle: 0, closed: false, wake: wake, woken: woken })
+    send!(pool)
+    let mut slots: List[usize] = []
+    for slot in 0..WORKERS:
+        slots.push(slot)
+    _ := join!(
+        event_loop(pool),
+        map_join(slots, WORKERS, fn!(slot: usize) -> void $ Renderer: worker!(pool)),
+    )
+
+## A `Renderer` for tests and scripted runs: `apply!` logs every command, and
+## `next_event!` pops a scripted event, or handler 0 (stop) when the script is
+## empty.
+pub struct Recorder:
+    pub log: List[Command]
+    pub events: List[UiEvent]
+
+impl Renderer for Recorder:
+    fn apply!(&mut self, commands: List[Command]) -> void:
+        for command in commands:
+            self.log.push(command)
+
+    fn next_event!(&mut self) -> UiEvent:
+        if self.events.is_empty():
+            UiEvent { handler: 0, payload: "" }
+        else:
+            self.events.remove_at(0)
+
+## A recorder that will answer `clicks` in order, then stop.
+pub fn scripted(clicks: List[usize]) -> *mut Recorder:
+    let mut events: List[UiEvent] = []
+    for handler in clicks:
+        events.push(UiEvent { handler: handler, payload: "" })
+    box(Recorder { log: [], events: events })

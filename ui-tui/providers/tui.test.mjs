@@ -732,3 +732,11 @@ test("hd run counter-tui, over pipes, paints what the fixture paints", { skip: h
   assert.equal(frames[0], expected, "the mount; regenerate fixtures/counter-mount.json if the example changed");
   assert.ok(frames.some((frame) => frame.includes("Count: 1")), "Tab, Enter clicked plus");
 });
+
+test("a prefixed event is another renderer's: no listener, and no focus", () => {
+  const tree = treeOf([
+    create(1, "box"),
+    { tag: "Listen", fields: { node: 1, event: "dom:focus", handler: 1 } },
+  ]);
+  assert.equal(tree.nodes.get(1).listeners.size, 0);
+});

@@ -84,7 +84,9 @@ pub struct Style:
     pub font_weight: f32?
     pub font_family: string?
     pub disabled: bool?
-    pub dom_class: string?
+    ## Keys beyond the portable ones, each with a renderer prefix such as
+    ## `dom:`, set through a renderer package's own words for them.
+    pub host_props: List[(string, PropValue)]
 
 impl Style:
     ## A style with no field set.
@@ -123,7 +125,7 @@ impl Style:
             font_weight: .None,
             font_family: .None,
             disabled: .None,
-            dom_class: .None,
+            host_props: [],
         }
 
     pub fn direction(self, value: Direction) -> Style:
@@ -225,8 +227,16 @@ impl Style:
     pub fn disabled(self, value: bool) -> Style:
         Style { ...self, disabled: .Some(value) }
 
-    pub fn dom_class(self, value: string) -> Style:
-        Style { ...self, dom_class: .Some(value) }
+    ## Sets one key beyond the portable ones. A renderer package wraps this
+    ## in its own words, as `ui-dom`'s `dom_class` does; a later value for a key
+    ## replaces the earlier one.
+    pub fn host_prop(self, key: string, value: PropValue) -> Style:
+        let mut kept: List[(string, PropValue)] = []
+        for (k, v) in self.host_props:
+            if k != key:
+                kept.push((k, v))
+        kept.push((key, value))
+        Style { ...self, host_props: kept }
 
     ## All four paddings.
     pub fn padding(self, px: f32) -> Style:
@@ -290,8 +300,14 @@ impl Style:
             font_weight: if other.font_weight.is_some(): other.font_weight else: self.font_weight,
             font_family: if other.font_family.is_some(): other.font_family else: self.font_family,
             disabled: if other.disabled.is_some(): other.disabled else: self.disabled,
-            dom_class: if other.dom_class.is_some(): other.dom_class else: self.dom_class,
+            host_props: merge_host_props(self.host_props, other.host_props),
         }
+
+fn merge_host_props(base: List[(string, PropValue)], over: List[(string, PropValue)]) -> List[(string, PropValue)]:
+    let mut out = Style { ...Style::empty(), host_props: base }
+    for (key, value) in over:
+        out = out.host_prop(key, value)
+    out.host_props
 
 fn direction_word(value: Direction) -> string:
     match value:
@@ -325,7 +341,7 @@ fn cursor_word(value: Cursor) -> string:
         .Pointer => "pointer"
         .Text => "text"
 
-## Every key of `style`, in lowering order, with its value or `.None`.
+## Every portable key of `style`, in lowering order, with its value or `.None`.
 pub fn entries(style: Style) -> List[(string, PropValue?)]:
     let mut out: List[(string, PropValue?)] = []
     out.push(("direction", style.direction.map(fn(v): PropValue.Text(direction_word(v)))))
@@ -361,7 +377,6 @@ pub fn entries(style: Style) -> List[(string, PropValue?)]:
     out.push(("font_weight", style.font_weight.map(fn(v): PropValue.Number(v))))
     out.push(("font_family", style.font_family.map(fn(v): PropValue.Text(v))))
     out.push(("disabled", style.disabled.map(fn(v): PropValue.Flag(v))))
-    out.push(("dom:class", style.dom_class.map(fn(v): PropValue.Text(v))))
     out
 
 ## The properties of `style` that are set, in key order: what a builder
@@ -372,6 +387,8 @@ pub fn lower(style: Style) -> List[(string, PropValue)]:
         match value:
             .Some(v) => out.push((key, v))
             .None => pass
+    for (key, value) in style.host_props:
+        out.push((key, value))
     out
 
 ## The keys whose value differs between `last` and `next`, with the new
@@ -390,4 +407,16 @@ pub fn diff(last: Style, next: Style) -> List[(string, PropValue)]:
                 .Some(v) => out.push((key, v))
                 .None => out.push((key, PropValue.Unset))
         index += 1
+    for (key, value) in next.host_props:
+        if !last.host_props.contains((key, value)):
+            out.push((key, value))
+    for (key, _) in last.host_props:
+        if !has_key(next.host_props, key):
+            out.push((key, PropValue.Unset))
     out
+
+fn has_key(props: List[(string, PropValue)], key: string) -> bool:
+    for (k, _) in props:
+        if k == key:
+            return true
+    false

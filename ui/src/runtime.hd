@@ -23,7 +23,7 @@ struct Runtime:
     ## Ids registered since the loop last took them.
     unposted: List[usize]
     next_job: usize
-    ## The node of the builder that finished last, for `attr`.
+    ## The node of the builder that finished last, for `last_node`.
     last_node: NodeId
     ## The sources the last dispatched handler wrote.
     last_writes: List[SourceId]
@@ -57,7 +57,7 @@ pub fn create_node(kind: string) -> NodeId:
     emit(.Create(node, kind))
     node
 
-## Records `node` as the one the last builder made, for `attr`.
+## Records `node` as the one the last builder made, for `last_node`.
 pub fn mark_built(node: NodeId) -> void:
     runtime().last_node = node
 

@@ -1,3 +1,4 @@
+use pkg.runtime.{run_job, take_new_jobs}
 use pkg.{
     Command,
     Resource,
@@ -9,11 +10,9 @@ use pkg.{
     mount,
     reset_for_test,
     resource,
-    run_job,
     show,
     signal,
     take_commands,
-    take_new_jobs,
     text_live,
 }
 use std.testing.assert_equal

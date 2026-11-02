@@ -185,8 +185,8 @@ round of effects.
 **Builders return `void`.** A function's final expression must match its result
 type, so if builders returned a `NodeId`, every component ending in `text(...)`
 would be a `type-mismatch`. Instead the runtime records the node of the builder
-that finished last. `last_node()` returns it, and `on`, `attr` and `attr_live`
-apply to it.
+that finished last. `last_node()` returns it, and `on`, `prop`, `prop_live` and
+`ui-dom`'s `attr` and `attr_live` apply to it.
 
 **`text_live` takes no style.** Its block is usually positional, and a positional
 argument cannot skip a default. Live text is styled by a wrapping `view`, which is
@@ -231,7 +231,7 @@ A `resource` loads a value with a suspending function whenever its tracked key
 changes. It is a `ReadSignal[Resource[T, E]]` of `Loading`, `Ready` or `Failed`.
 
 **Loads run on a pool of workers.** The loop must serve events while loaders run, and
-there is no way to start a task later, so `run_app!` starts a fixed set of workers beside the
+there is no way to start a task later, so `run_on!` starts a fixed set of workers beside the
 event loop, with `join!` and `map_join!`.
 
 **Jobs wait in a plain list, and a channel only wakes workers.** `std.task`'s usual pool sends
@@ -239,7 +239,7 @@ items down a shared channel (`std-task.channel.pool`), but here that capacity wo
 worker hands over the jobs its own load made, so with the channel full every worker could wait on
 `send!` at once, and the program would die of `suspension-deadlock`. So a token is sent only for a
 worker counted idle, the tokens never outnumber the capacity, and `send!` never waits. Hosts stay out
-of it, so `Surface` has only `apply!` and `next_event!`.
+of it, so `Renderer` has only `apply!` and `next_event!`.
 
 **A loader has the empty row.** Its providers are bound when the cold suspension is
 made, inside the resource's tracking computation, which cannot carry a row
@@ -264,20 +264,20 @@ every sleep completes at once and a sleeping loader always beats the deadline.
 
 ## The run loop
 
-`run_app!(root)` lives in each renderer package, since it is the only suspending part.
+`run_on!(root)` lives in `ui`, on the `Renderer` trait, and each renderer package adapts its host trait to it in `run_app!`.
 It mounts, sends the first batch, then runs `join!(event_loop(), workers())`.
 
 - `event_loop!` takes `next_event!`, dispatches, and sends, until an event names
-  handler 0. Then it posts job 0. It calls `$.use(Surface)` fresh each time, so no
+  handler 0. Then it posts job 0. It calls `$.use(Renderer)` fresh each time, so no
   reference into the provider is live while a handler runs.
 - `worker!` takes a job from the pool, runs it with `run_job!`, and sends what it emitted. With no
   job it waits on the channel, and once the loop has ended and no job is left it stops. So a load in
   flight at shutdown still lands, as do any loads it leads to.
 - There are four workers, so at most four loads are in flight at once.
 
-`Recorder` implements `Surface` in hd for tests: `apply!` logs, and `next_event!` pops a scripted event
-or answers handler 0. Core tests in `ui` need no host at all: they use `mount`, `dispatch`,
-`take_commands` and `run_job!`.
+`Recorder` implements `Renderer` in hd for tests: `apply!` logs, and `next_event!` pops a scripted event
+or answers handler 0, so the loop's tests in `ui` need no host at all. Tests below the loop use `mount`,
+`dispatch` and `take_commands`.
 
 ## Known limits
 

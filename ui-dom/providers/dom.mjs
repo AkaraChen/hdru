@@ -122,6 +122,7 @@ const kinds = {
   text: { tag: "span", css: {} },
   button: { tag: "button", css: {} },
   input: { tag: "input", css: {}, type: "text" },
+  "dom:textarea": { tag: "textarea", css: {} },
   checkbox: { tag: "input", css: {}, type: "checkbox" },
   fragment: { tag: "div", css: { display: "contents" } },
 };
@@ -140,7 +141,8 @@ function warnOnce(seen, what, log) {
   log(`ui: ignoring unknown ${what}`);
 }
 
-export function createDomSurface(root, nodes = new Map(), log = (line) => console.warn(line)) {
+// `trace` receives a line per batch and command; `log` what the renderer ignored.
+export function createDomSurface(root, nodes = new Map(), log = (line) => console.warn(line), trace = (line) => console.log(line)) {
   nodes.set(0, root);
   const queue = [];
   const seen = new Set();
@@ -217,16 +219,21 @@ export function createDomSurface(root, nodes = new Map(), log = (line) => consol
         const handler = f.handler;
         const element = node(f.node);
         if (f.event === "enter") {
-          // Not in rendering.md's event list: the todos example's Enter.
           element.addEventListener("keydown", (domEvent) => {
             if (domEvent.key === "Enter") push({ handler, payload: payloadOf(domEvent.target) });
           });
         } else if (f.event === "key") {
           element.addEventListener("keydown", (domEvent) => push({ handler, payload: domEvent.key }));
-        } else {
-          element.addEventListener(f.event, (domEvent) => {
-            push({ handler, payload: payloadOf(domEvent.target) });
+        } else if (f.event === "click" || f.event === "input" || f.event === "change") {
+          element.addEventListener(f.event, (domEvent) => push({ handler, payload: payloadOf(domEvent.target) }));
+        } else if (f.event.startsWith("dom:")) {
+          // The DOM's own events. A CustomEvent from the page carries its payload.
+          element.addEventListener(f.event.slice("dom:".length), (domEvent) => {
+            const payload = typeof domEvent.detail === "string" ? domEvent.detail : payloadOf(domEvent.target);
+            push({ handler, payload });
           });
+        } else {
+          warnOnce(seen, `event ${f.event}`, log);
         }
         break;
       }
@@ -251,10 +258,10 @@ export function createDomSurface(root, nodes = new Map(), log = (line) => consol
   return {
     apply(commands) {
       batch += 1;
-      console.log(`ui: batch ${batch}: ${commands.length} command(s)`);
+      trace(`ui: batch ${batch}: ${commands.length} command(s)`);
       for (const command of commands) {
         apply(command);
-        console.log(`ui:   ${command.tag} ${JSON.stringify(command.fields)}`);
+        trace(`ui:   ${command.tag} ${JSON.stringify(command.fields)}`);
       }
     },
     next_event() {
