@@ -1,0 +1,293 @@
+## The playground: edit an hdru program, see its type errors as you type, run
+## it beside the commands it sends. Written in hdru; the compiler and the
+## preview are behind the `Workbench` host trait.
+use std.function.Fn
+use dep.ui.{
+    Align,
+    Mutate,
+    Palette,
+    ReadSignal,
+    Resource,
+    Signal,
+    Size,
+    Style,
+    Theme,
+    Track,
+    Ui,
+    button,
+    column,
+    for_each,
+    memo,
+    on,
+    provide_theme,
+    resource,
+    rgb,
+    row,
+    show,
+    signal,
+    style_live,
+    text,
+    text_live,
+    view,
+}
+use dep.ui_dom.{DomStyle, attr, attr_live, dom_on, textarea}
+pub use pkg.workbench.{Problem, Report, Workbench}
+
+# The most command log text kept, in characters.
+LOG_LIMIT := 20000
+
+EXAMPLES := ["counter", "todos", "fetcher", "type-error"]
+
+# The latest report, shown until a newer one lands, so nothing blinks on each
+# keystroke.
+struct Held:
+    report: Report?
+
+# The surfaces of hd-lang's "Orbit" design (website/assets/style.css).
+fn palette_of(dark: bool) -> Palette:
+    if dark:
+        Palette {
+            background: rgb(11, 15, 20),
+            surface: rgb(15, 21, 28),
+            on_surface: rgb(219, 230, 232),
+            muted: rgb(141, 158, 165),
+            line: rgb(26, 35, 44),
+            accent: rgb(46, 230, 212),
+            on_accent: rgb(4, 33, 30),
+        }
+    else:
+        Palette {
+            background: rgb(247, 250, 250),
+            surface: rgb(255, 255, 255),
+            on_surface: rgb(24, 34, 43),
+            muted: rgb(83, 99, 107),
+            line: rgb(223, 232, 232),
+            accent: rgb(28, 196, 182),
+            on_accent: rgb(4, 33, 30),
+        }
+
+## What a problem's row says.
+pub fn label(p: Problem) -> string:
+    place := if p.line > 0: "${p.line}:${p.column} " else: ""
+    code := if p.code == "": "" else: "${p.code}: "
+    "$place$code${p.message}"
+
+## What the status chip says about the latest report.
+pub fn status_text(latest: Report?) -> string:
+    match latest:
+        .None => "Checking…"
+        .Some(report) =>
+            count := report.problems.len()
+            if count == 0:
+                "No errors"
+            else if count == 1:
+                "1 problem"
+            else:
+                "$count problems"
+
+## The status chip's state, which its stylesheet colors.
+pub fn status_state(latest: Report?) -> string:
+    match latest:
+        .None => "checking"
+        .Some(report) =>
+            if report.problems.is_empty(): "ok" else: "problems"
+
+## What the preview says when no program is showing.
+pub fn preview_note(ran: Resource[Report, string], latest: Report?) -> string:
+    match ran:
+        .Loading => "Compiling…"
+        .Failed(why) => "Run failed: $why"
+        .Ready(report) =>
+            if report.ok:
+                return "Stopped. Press Run to start again."
+            match latest:
+                .Some(now) =>
+                    if now.ok: "Press Run to try again." else: "Not run: fix the problems first."
+                .None => "Not run: fix the problems first."
+
+## The editor's gutter for `source`: one number per line.
+pub fn line_numbers(source: string) -> string:
+    let mut out = "1"
+    for n in 2..(source.split("\n").len() + 1):
+        out = "$out\n$n"
+    out
+
+## `log` with `more` added, its oldest text cut past the limit.
+pub fn appended(log: string, more: string) -> string:
+    next := log + more + "\n"
+    if next.len() <= LOG_LIMIT:
+        return next
+    # Cut at a line, so the panel never starts mid-character or mid-line.
+    let mut lines = next.split("\n")
+    while lines.len() > 1 && lines.join("\n").len() > LOG_LIMIT:
+        _ := lines.remove_at(0)
+    lines.join("\n")
+
+fn pressed(on: bool) -> string:
+    if on: "true" else: "false"
+
+fn theme_label(dark: bool) -> string:
+    if dark: "Switch to light theme" else: "Switch to dark theme"
+
+# A panel's title bar, with a live note at its end.
+fn panel_head[F < 'static & Fn() -> string $ Track](title: string, note: F) -> void $ Ui:
+    row(style=Style::empty().align(.Center).gap(8.0).dom_class("panel-head")):
+        view(style=Style::empty().dom_class("panel-title")):
+            text(title)
+        view(style=Style::empty().grow(1.0)):
+            pass
+        view(style=Style::empty().dom_class("panel-note")):
+            text_live(note)
+
+# One problem. A row is keyed by its position, so the rows a list can ever hold
+# are as many as its longest report, however long the session.
+fn problem_row(item: ReadSignal[Problem], bench: *mut dyn Workbench) -> void $ Ui:
+    view(style=Style::empty().dom_class("problem")):
+        text_live:
+            label(item.get())
+    attr_live("data-severity", fn(): item.get().severity)
+    attr("role", "button")
+    attr("tabindex", "0")
+    on("click", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
+    on("enter", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
+
+# What a theme choice writes. Colors that follow it are in `style_live`s, and
+# hover and focus colors are the stylesheet's, which the host keeps in step.
+fn apply_theme(dark: Signal[bool], palette: Signal[Palette], next: bool) -> void $ Mutate:
+    dark.set(next)
+    palette.set(palette_of(next))
+
+fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]) -> void $ Ui + Theme:
+    theme := $.use(Theme).palette()
+    current := signal("counter")
+    source := signal(bench.example("counter"))
+    runs := signal(+0)
+    log := signal("")
+    checked := resource(
+        fn(): source.get(),
+        fn!(text: string) -> Result[Report, string]:
+            .Ok(bench.check!(text))
+        ,
+    )
+    # A run reads the source when it starts, so typing does not start one.
+    ran := resource(
+        fn(): runs.get(),
+        fn!(key: i32) -> Result[Report, string]:
+            .Ok(bench.run!(source.peek()))
+        ,
+    )
+    held := box(Held { report: .None })
+    latest := memo:
+        match checked.get():
+            .Ready(report) => held.report = .Some(report)
+            _ => pass
+        held.report
+    problems := memo:
+        match latest.get():
+            .Some(report) => report.problems
+            .None => []
+    numbers := memo:
+        line_numbers(source.get())
+    start := fn() -> void $ Mutate:
+        log.set("")
+        runs.update(fn(n): n + 1)
+    column(style=Style::empty().height(.Pct(100.0))):
+        style_live:
+            p := theme.get()
+            Style::empty().bg(p.background).color(p.on_surface)
+        row(style=Style::empty().gap(8.0).align(.Center).wrap(true).dom_class("topbar")):
+            view(style=Style::empty().dom_class("brand-mark")):
+                pass
+            view(style=Style::empty().dom_class("brand")):
+                text("hdru")
+            view(style=Style::empty().dom_class("brand-sub")):
+                text("playground")
+            button("Run", fn(): start(), style=Style::empty().dom_class("btn btn-primary"))
+            button("Stop", fn(): bench.stop(), style=Style::empty().dom_class("btn"))
+            row(style=Style::empty().dom_class("tabs")):
+                for name in EXAMPLES:
+                    button(
+                        name,
+                        fn():
+                            current.set(name)
+                            source.set(bench.example(name))
+                            start()
+                        ,
+                        style=Style::empty().dom_class("tab"),
+                    )
+                    attr_live("aria-pressed", fn(): pressed(current.get() == name))
+            view(style=Style::empty().grow(1.0)):
+                pass
+            view(style=Style::empty().dom_class("status")):
+                text_live:
+                    status_text(latest.get())
+            attr_live("data-state", fn(): status_state(latest.get()))
+            button(
+                "",
+                fn():
+                    next := !dark.peek()
+                    bench.set_dark(next)
+                    apply_theme(dark, palette, next)
+                ,
+                style=Style::empty().dom_class("btn btn-icon theme-toggle"),
+            )
+            attr("id", "theme-toggle")
+            attr_live("aria-label", fn(): theme_label(dark.get()))
+            attr_live("title", fn(): theme_label(dark.get()))
+        row(style=Style::empty().grow(1.0).min_height(.Px(0.0)).dom_class("workspace")):
+            column(style=Style::empty().grow(1.0).width(.Pct(50.0)).min_height(.Px(0.0)).dom_class("half half-left")):
+                # The field on top edits; the same text behind it shows the
+                # colors and the problems (web/playground/editor.mjs).
+                view(style=Style::empty().grow(1.0).height(.Px(0.0)).dom_class("editor")):
+                    style_live:
+                        Style::empty().bg(theme.get().surface)
+                    view(style=Style::empty().font_size(13.0).dom_class("editor-gutter")):
+                        text_live:
+                            numbers.get()
+                    view(style=Style::empty().padding(12.0).font_size(13.0).dom_class("editor-back")):
+                        text_live:
+                            source.get()
+                    attr("id", "editor-back")
+                    textarea(source, style=Style::empty().padding(12.0).font_size(13.0).dom_class("editor-input"))
+                view(style=Style::empty().dom_class("dock")):
+                    panel_head("Problems", fn(): "${problems.get().len()}")
+                    view(style=Style::empty().max_height(.Px(160.0)).dom_class("pane")):
+                        show(fn(): problems.get().is_empty()):
+                            view(style=Style::empty().dom_class("empty")):
+                                text("Nothing to fix.")
+                        for_each(problems, fn(p): p.id, fn(item): problem_row(item, bench))
+            column(style=Style::empty().grow(1.0).width(.Pct(50.0)).min_height(.Px(0.0)).dom_class("half")):
+                panel_head("Preview", fn(): "sandboxed")
+                view(style=Style::empty().grow(1.0).height(.Px(0.0)).dom_class("stage")):
+                    style_live:
+                        Style::empty().bg(theme.get().surface)
+                    view(style=Style::empty().dom_class("stage-note")):
+                        text_live:
+                            preview_note(ran.get(), latest.get())
+                    view(style=Style::empty().dom_class("stage-frame")):
+                        pass
+                    attr("id", "preview")
+                panel_head("Commands", fn(): "what the UI sends its renderer")
+                view(style=Style::empty().grow(1.0).height(.Px(0.0)).dom_class("pane log")):
+                    text_live:
+                        log.get()
+                # Both act on the view just built.
+                attr("id", "commands")
+                dom_on("preview-log", fn(more: string) -> void $ Mutate: log.update(fn(now): appended(now, more)))
+
+## The playground.
+pub fn app() -> void $ Ui + Workbench:
+    let bench: *mut dyn Workbench = $.use(Workbench)
+    starts_dark := bench.prefers_dark()
+    dark := signal(starts_dark)
+    palette := signal(palette_of(starts_dark))
+    provide_theme(palette):
+        shell(bench, dark, palette)
+    # Both act on the shell's root, the column just built.
+    attr("id", "shell")
+    dom_on(
+        "theme-change",
+        fn(scheme: string) -> void $ Mutate:
+            apply_theme(dark, palette, scheme == "dark")
+        ,
+    )

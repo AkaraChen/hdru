@@ -1,0 +1,5 @@
+use dep.ui_dom.{Surface, run_app}
+use pkg.{Workbench, app}
+
+pub fn main!() -> void $ Surface + Workbench:
+    run_app!(app)

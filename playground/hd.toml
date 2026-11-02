@@ -1,0 +1,17 @@
+[package]
+name = "playground"
+
+[dependencies]
+ui = { path = "../ui", version = "0.1.0" }
+ui-dom = { path = "../ui-dom", version = "0.1.0" }
+
+[host]
+"workbench.Workbench" = "providers/workbench.mjs"
+
+[capabilities]
+"dep.ui_dom.surface.Surface" = true
+"pkg.workbench.Workbench" = true
+
+[[executable]]
+name = "playground"
+module = "main"

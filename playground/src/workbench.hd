@@ -1,0 +1,44 @@
+## What the playground's page does for it that hd cannot: compiling, running
+## the program in the preview, showing a place in the editor, and holding the
+## example sources. The JavaScript provider is `providers/workbench.mjs`.
+
+## One compiler diagnostic. A diagnostic with no place in the editor has line
+## 0. Lines and columns start at 1 and count characters; the end is exclusive.
+@derive(Eq, Debug)
+pub struct Problem:
+    ## Its position in its report, which keys its row.
+    pub id: i32
+    pub line: i32
+    pub column: i32
+    pub end_line: i32
+    pub end_column: i32
+    pub code: string
+    pub severity: string
+    pub message: string
+
+## How a compile went.
+@derive(Eq, Debug)
+pub struct Report:
+    pub ok: bool
+    pub problems: List[Problem]
+
+@host
+pub trait Workbench:
+    ## The source of the example called `name`.
+    fn example(&mut self, name: string) -> string
+    ## Whether to start dark: the visitor's saved choice, else the system's.
+    ## Until a choice is saved, the host reports each change of the system's
+    ## as a "theme-change" event, "dark" or "light", on `#shell`.
+    fn prefers_dark(&mut self) -> bool
+    ## Saves the visitor's choice and applies it to what hdru does not draw:
+    ## the page's own colors and the preview's defaults.
+    fn set_dark(&mut self, dark: bool) -> void
+    ## Type-checks `source`. Results for superseded sources may be empty.
+    fn check!(&mut self, source: string) -> Report
+    ## Compiles `source` and, when it builds, runs it in the preview,
+    ## replacing the program running there.
+    fn run!(&mut self, source: string) -> Report
+    ## Stops the program running in the preview.
+    fn stop(&mut self) -> void
+    ## Selects `problem`'s place in the editor and scrolls to it.
+    fn reveal(&mut self, problem: Problem) -> void

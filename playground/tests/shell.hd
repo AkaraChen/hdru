@@ -1,0 +1,136 @@
+use std.testing.assert_equal
+use dep.ui.{Command, HandlerId, NodeId, PropValue, Resource, UiEvent, dispatch, mount, reset_for_test, take_commands}
+use pkg.{Problem, Report, Workbench, app, appended, label, line_numbers, preview_note, status_state, status_text}
+
+fn problem(line: i32) -> Problem:
+    Problem {
+        id: 0,
+        line: line,
+        column: 5,
+        end_line: line,
+        end_column: 9,
+        code: "unknown-name",
+        severity: "error",
+        message: "`nope` is not defined",
+    }
+
+fn failed() -> Report:
+    Report { ok: false, problems: [problem(2)] }
+
+fn clean() -> Report:
+    Report { ok: true, problems: [] }
+
+struct Bench:
+    dark: bool
+    saved: string
+
+impl Workbench for Bench:
+    fn example(&mut self, name: string) -> string:
+        "# $name\n"
+
+    fn prefers_dark(&mut self) -> bool:
+        self.dark
+
+    fn set_dark(&mut self, dark: bool) -> void:
+        self.saved = if dark: "dark" else: "light"
+
+    fn check!(&mut self, source: string) -> Report:
+        clean()
+
+    fn run!(&mut self, source: string) -> Report:
+        clean()
+
+    fn stop(&mut self) -> void:
+        pass
+
+    fn reveal(&mut self, problem: Problem) -> void:
+        pass
+
+fn listener(commands: List[Command], name: string) -> HandlerId:
+    for command in commands:
+        match command:
+            .Listen(_, event, handler) =>
+                if event == name:
+                    return handler
+            _ => pass
+    panic("no listener for $name")
+
+it("a problem's label names its place and code"):
+    assert_equal(label(problem(2)), "2:5 unknown-name: `nope` is not defined", reason="placed")
+
+it("a problem with no place or code labels only its message"):
+    let mut p = problem(0)
+    p.code = ""
+    assert_equal(label(p), "`nope` is not defined", reason="no place")
+
+it("the status counts problems"):
+    assert_equal(status_text(.None), "Checking…", reason="nothing yet")
+    assert_equal(status_text(.Some(clean())), "No errors", reason="clean")
+    assert_equal(status_text(.Some(failed())), "1 problem", reason="one")
+    assert_equal(status_state(.None), "checking", reason="state, nothing yet")
+    assert_equal(status_state(.Some(clean())), "ok", reason="state, clean")
+    assert_equal(status_state(.Some(failed())), "problems", reason="state, failed")
+
+it("the preview says why nothing shows"):
+    let loading: Resource[Report, string] = .Loading
+    assert_equal(preview_note(loading, .None), "Compiling…", reason="compiling")
+    assert_equal(preview_note(.Ready(failed()), .Some(failed())), "Not run: fix the problems first.", reason="still broken")
+    assert_equal(preview_note(.Ready(failed()), .Some(clean())), "Press Run to try again.", reason="fixed")
+    assert_equal(preview_note(.Ready(clean()), .Some(failed())), "Stopped. Press Run to start again.", reason="ran")
+
+it("the gutter numbers every line, with the one after a final newline"):
+    assert_equal(line_numbers(""), "1", reason="empty")
+    assert_equal(line_numbers("a\nb\n"), "1\n2\n3", reason="trailing newline")
+
+it("the log drops its oldest lines past the limit, at a line"):
+    long := "x".repeat(15000)
+    two := appended(appended("", "first $long"), "second $long")
+    assert_equal(two, "second $long\n", reason="oldest line gone")
+
+it("a system theme change only restyles"):
+    reset_for_test()
+    $.with(Workbench=box(Bench { dark: false, saved: "" })):
+        _ := mount(app)
+    commands := take_commands()
+    dispatch(UiEvent { handler: listener(commands, "dom:theme-change"), payload: "dark" })
+    changes := take_commands()
+    assert_equal(changes.is_empty(), false, reason="something restyled")
+    for change in changes:
+        match change:
+            .SetProp(_, _, _) => pass
+            _ => panic("not only a restyle")
+
+# The click handler of the node whose id attribute is `id`.
+fn click_of(commands: List[Command], id: string) -> HandlerId:
+    # Node 0 is the root, which never has an id.
+    let mut found: NodeId = 0
+    for command in commands:
+        match command:
+            .SetProp(node, key, value) =>
+                if key == "dom:attr:id" && value == PropValue.Text(id):
+                    found = node
+            _ => pass
+    for command in commands:
+        match command:
+            .Listen(node, event, handler) =>
+                if event == "click" && node == found:
+                    return handler
+            _ => pass
+    panic("no click handler on #$id")
+
+it("the theme button saves the choice and only restyles"):
+    reset_for_test()
+    bench := box(Bench { dark: false, saved: "" })
+    $.with(Workbench=bench):
+        _ := mount(app)
+    commands := take_commands()
+    dispatch(UiEvent { handler: click_of(commands, "theme-toggle"), payload: "" })
+    assert_equal(bench.saved, "dark", reason="saved")
+    changes := take_commands()
+    assert_equal(changes.is_empty(), false, reason="something restyled")
+    for change in changes:
+        match change:
+            .SetProp(_, _, _) => pass
+            _ => panic("not only a restyle")
+    dispatch(UiEvent { handler: click_of(commands, "theme-toggle"), payload: "" })
+    assert_equal(bench.saved, "light", reason="toggled back")
