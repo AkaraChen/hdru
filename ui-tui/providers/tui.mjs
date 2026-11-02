@@ -20,12 +20,13 @@
 // is exported for providers/tui.test.mjs, which needs no terminal; importing
 // this module touches nothing until the first `apply`.
 
+import { execFileSync, spawn } from "node:child_process";
 import { closeSync, createReadStream, fstatSync, openSync, readSync, unlinkSync, writeSync } from "node:fs";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ReadStream, WriteStream, isatty } from "node:tty";
-import { isMainThread } from "node:worker_threads";
+import { Worker, isMainThread } from "node:worker_threads";
 
 // ---- Units ---------------------------------------------------------------
 //
@@ -912,6 +913,64 @@ export function captureStderr() {
   };
 }
 
+// A process that outlives this one: if its pipe from us closes while it still
+// runs, we died without cleaning up (a killed worker, SIGKILL, a crash), and it
+// puts the terminal back. A clean exit kills it first. It is in its own session
+// so a terminal signal cannot reach it, and it writes to the fd it inherits.
+export function startGuard() {
+  try {
+    const saved = execFileSync("stty", ["-g"], { stdio: [0, "pipe", "ignore"], encoding: "utf8" }).trim();
+    const script = `IFS= read -r line
+printf '%s' "$2"
+stty "$1" <&1 2>/dev/null
+printf 'ui-tui: the program was killed; its last message may be lost\\n'`;
+    const guard = spawn("/bin/sh", ["-c", script, "ui-tui-guard", saved, LEAVE_SCREEN], {
+      detached: true,
+      stdio: ["pipe", 1, "ignore"],
+    });
+    guard.on("error", () => {});
+    guard.stdin.on("error", () => {});
+    guard.unref();
+    guard.stdin.unref?.();
+    return guard;
+  } catch {
+    return null;
+  }
+}
+
+// Reads a terminal on a thread of its own, so Ctrl-C is seen while the main
+// thread is stuck in Wasm, where a raw terminal sends no signal and nothing else
+// would ever read the byte. If a second passes with no sign of the main thread,
+// the process is killed and the guard puts the terminal back.
+const KEY_READER = `
+const { parentPort, workerData } = require("node:worker_threads");
+const { ReadStream } = require("node:tty");
+const alive = new Int32Array(workerData.alive);
+const input = new ReadStream(0);
+input.setEncoding("utf8");
+input.on("data", (text) => {
+  if (text.includes("\\x03")) {
+    const seen = Atomics.load(alive, 0);
+    setTimeout(() => {
+      if (Atomics.load(alive, 0) === seen) process.kill(process.pid, "SIGKILL");
+    }, workerData.waitMs).unref();
+  }
+  parentPort.postMessage(text);
+});
+input.on("end", () => parentPort.postMessage(null));
+`;
+
+function startKeyReader(data, end) {
+  const alive = new Int32Array(new SharedArrayBuffer(4));
+  const reader = new Worker(KEY_READER, { eval: true, workerData: { alive: alive.buffer, waitMs: 1000 } });
+  reader.on("message", (text) => {
+    Atomics.add(alive, 0, 1);
+    if (text === null) end();
+    else data(text);
+  });
+  return reader;
+}
+
 // The process's own terminal, or pipes. It starts on the first `apply`, and
 // the `exit` hook puts the terminal back however the program ends.
 export function processTerminal(env = process.env) {
@@ -920,6 +979,8 @@ export function processTerminal(env = process.env) {
   let open = false;
   let stderr = null;
   let sizeTimer = null;
+  let guard = null;
+  let reader = null;
   const close = () => {
     if (!open) return;
     open = false;
@@ -927,6 +988,7 @@ export function processTerminal(env = process.env) {
     const { input, output } = opened();
     if (input.isTTY) input.setRawMode(false);
     if (output.isTTY) output.write(LEAVE_SCREEN);
+    guard?.kill("SIGKILL");
     const captured = stderr?.drain();
     if (captured) output.write(captured);
   };
@@ -948,10 +1010,15 @@ export function processTerminal(env = process.env) {
       const { input, output, owned } = opened();
       open = true;
       process.on("exit", close);
+      if (output.isTTY) guard = startGuard();
       if (input.isTTY) input.setRawMode(true);
-      input.setEncoding("utf8");
-      input.on("data", data);
-      input.on("end", end);
+      if (input.isTTY && !owned) {
+        reader = startKeyReader(data, end);
+      } else {
+        input.setEncoding("utf8");
+        input.on("data", data);
+        input.on("end", end);
+      }
       if (output.isTTY) {
         stderr = captureStderr();
         output.write(ENTER_SCREEN);
@@ -975,6 +1042,7 @@ export function processTerminal(env = process.env) {
       close();
       process.off("exit", close);
       const { input, owned } = opened();
+      reader?.terminate();
       input.pause();
       if (owned) input.destroy();
       else input.unref?.();

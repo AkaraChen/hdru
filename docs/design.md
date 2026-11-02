@@ -693,6 +693,20 @@ Handled in the provider, once it was clear none of them waits on upstream:
   clicks it; a field only takes the focus. It counts the screen's scroll. Mouse
   reporting takes selection from the terminal, which most give back under Shift.
 - **A wide glyph half overwritten** blanks its other half.
+- **A stuck program can be stopped, and any death restores the terminal.** A
+  handler in an endless loop blocks the main thread. In raw mode Ctrl-C is only a
+  byte, so nothing read it: Ctrl-C and `q` did nothing, and the program had to be
+  killed from elsewhere (reproduced). `stty isig` is no answer, since it would
+  turn every Ctrl-C into a signal and lose handler 0. Instead keys are read on a
+  thread of their own; if a second passes after Ctrl-C with no sign of the main
+  thread, it sends SIGKILL. Then a guard, a small `sh` in its own session, waits on
+  a pipe from the provider: if the pipe closes while it still runs, the provider
+  died without cleaning up, and it leaves the alternate screen, restores `stty`
+  and says so. A clean exit kills it first. This also covers a busy loop past
+  `--time-limit`, where the host terminates the worker and no provider code runs;
+  an earlier note here that this left the terminal raw was wrong, since libuv
+  resets the mode at exit. It was the alternate screen, wrapping, cursor and mouse
+  reporting that stayed. A `q` is not honored while stuck, only Ctrl-C.
 
 Known limits:
 
@@ -701,12 +715,9 @@ Known limits:
   warning onto the screen, so there is no capture there, and the main thread
   writes the line while the screen is up. The stack and status 3 survive, and
   `2>file` keeps the line.
-- A busy loop in Wasm past `--time-limit` gets the worker terminated with no
-  chance to run the provider, which would leave the terminal raw. Not tried; the
-  provider has no hook for it.
 - No scrolling inside a box, and no text selection in a field.
-- The fd 2 swap, the worker path and real mouse input were checked by hand in
-  tmux. The unit tests cannot reach them, since they need a real terminal.
+- The fd 2 swap, the worker path, the key thread, the guard and real mouse input
+  were checked by hand in tmux. The unit tests cannot reach them, since they need a real terminal.
 
 ### Plan B: what a GPUI renderer would need
 

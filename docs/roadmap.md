@@ -60,7 +60,7 @@ Each phase ends with `hd test` green on Node and, where it touches a
 builder, the three examples re-run under Node (`UI_CLICKS=...`) and the
 browser pages rebuilt once. Each phase adds its section to `design.md`.
 
-### Phase 9: hygiene (half a day)
+### Phase 9: hygiene (half a day; done 2026-11-02, `8ce8304`)
 
 Small fixes from the review, done first because phases 11 and 12 make
 every one of them fire more often.
@@ -92,7 +92,7 @@ behavior (equality skip emits nothing; duplicate key panics; a `show`
 toggled 100 times leaves the provider's map at its mount size, checked
 from a Node test over `dom.mjs`).
 
-### Phase 10: row-polymorphic builders and typed context (1 day)
+### Phase 10: row-polymorphic builders and typed context (1 day; done 2026-11-02, `8ce8304`)
 
 The flagship pattern of `spec/lang/11` applied to the synchronous build
 path.
@@ -183,9 +183,7 @@ key order), for `style_live` (changed keys only, `Unset` on a field that
 went to `None`, nothing on an equal style), and a Node test over
 `dom.mjs` that each key in the table produces the CSS the table names.
 
-### Phase 13: input controls (1 day; `input`, `checkbox` and
-`tests/inputs.hd` are already in the working tree, so what remains is the
-todos example and the payload rules below)
+### Phase 13: input controls (1 day; done 2026-11-02, `8ce8304`)
 
 - `UiEvent.payload` and `fn(string) -> void $ Mutate` handlers exist; add
   `input(value: Signal[string], class="")` that emits
@@ -201,14 +199,14 @@ todos example and the payload rules below)
 Gate: `tests/inputs.hd` drives `dispatch` with payloads through `Recorder`;
 the browser todos page adds a todo typed by hand.
 
-### Phase 14: resource policies (half a day)
+### Phase 14: resource policies (half a day; done 2026-11-02, `8ce8304`)
 
 `std.task` layers (`timeout`, `retry`, `fallback`, `hedged`) compose over
 `fn!() -> T $ R`. `resource(key, load, policy=timeout(ms(5000)))` wraps
 the loader with `apply!` inside `land`. No new machinery; one parameter
 and a test with `ManualClock` that a slow loader lands as `Failed`.
 
-### Phase 15: make `Mutate` earn its place (optional, half a day)
+### Phase 15: make `Mutate` earn its place (optional, half a day; done 2026-11-02, `8ce8304`)
 
 `Scheduler` only counts writes and `batch` lives on a graph counter. Two
 cheap uses of the hook that is already there: a `Mutate` provider for
