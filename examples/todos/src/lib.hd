@@ -100,7 +100,7 @@ fn list() -> void $ Ui + Theme:
             input(draft, style=Style::empty().grow(1.0).padding_x(8.0).padding_y(4.0).radius(6.0).border(1.0, p.line))
             on(
                 "enter",
-                fn(title: string) -> void $ Mutate:
+                fn(title: string):
                     add(todos, next_id, draft, title)
                 ,
             )

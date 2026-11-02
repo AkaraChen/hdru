@@ -64,14 +64,14 @@ Tests run on the Node engine only; this `hd` build has no wasmtime engine.
 ## Prerequisites
 
 - The `hd-lang` checkout beside this repo at `../hd-lang`, last checked at
-  commit `cf5040b4a`. The browser build imports its `host/*.ts` directly.
+  commit `717b76ad8`. The browser build imports its `host/*.ts` directly.
 - The `hd` binary built from it: `cargo install --path crates/hd_cli`
   inside `../hd-lang` (lands in `~/.cargo/bin/hd`). The Node engine is the
   default, and the renderers cannot run under wasmtime.
 - Node 20 or newer, and `pnpm` (for `pnpm dlx esbuild`) if you build the
   browser pages.
-- Do not run `hd fmt` without `hd check` after it: see
-  [hd-lang#1165](https://github.com/HerringtonDarkholme/hd-lang/issues/1165).
+- Do not run `hd fmt` without `hd check` after it: it can still produce code the
+  parser rejects (`docs/design.md`, "Upstream issues").
 
 ## Commands
 

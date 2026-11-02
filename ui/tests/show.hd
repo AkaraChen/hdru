@@ -54,7 +54,7 @@ it("show mounts its branch in place and keeps the node after it"):
     reset_for_test()
     _ := mount(toggler)
     commands := take_commands()
-    assert_equal(commands.get(0), .Some(Command.Create(1, "box")), reason="column")
+    assert_equal(commands.get(0).copied(), .Some(Command.Create(1, "box")), reason="column")
     assert_equal(commands.contains(.Create(5, "fragment")), true, reason="the fragment")
     assert_equal(commands.contains(.Append(5, 6)), true, reason="inner text under the fragment")
     assert_equal(commands.contains(.SetText(6, "Inner: 0")), true, reason="inner text")

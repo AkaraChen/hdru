@@ -3,7 +3,7 @@
 How the library works and why it is built this way. `rendering.md` covers the
 protocol, the vocabulary and the renderers; `packages.md` covers the workspace.
 Everything here was checked against the `hd-lang` checkout at commit
-`cf5040b4a`. Earlier plans and the phase-by-phase record are in git history.
+`717b76ad8`. Earlier plans and the phase-by-phase record are in git history.
 
 ## What it is
 
@@ -21,14 +21,14 @@ eager read in a component body is a compile error, not a runtime check.
 Every public signature follows these. They come from probing the compiler, and
 they explain most of what looks odd in the API.
 
-1. **A closure's row must equal an `Fn` or `FnMut` bound's row exactly.**
-   Bounds match a function value's exact row (`fn.trait.function-values`); row
-   subsumption applies only to concrete `fn` types. An unannotated closure takes
-   its row from its body, so `button("x", fn(): pass)` fails and is written
-   `fn() -> void $ Mutate: pass`. A trailing block is the same closure and fails
-   the same way. So a callback that needs another key captures it lexically
-   (`console := $.use(Console)` before the block), and each bound lists only the
-   row the library re-installs at run time.
+1. **A closure passed to an `Fn` or `FnMut` bound takes the bound's row, but a
+   trailing block's row comes from its body.** `button("x", fn(): pass)` works
+   (`fn.trait.bound-closure`). A trailing block must use exactly the bound's row,
+   so an `effect:` that reads only through `untrack`, or a `text_live:` that reads
+   no signal, fails with `unsatisfied-trait-bound` and is written as an explicit
+   closure, `effect(fn(): ...)`. A callback that needs another key captures it
+   lexically (`console := $.use(Console)` before the block), and each bound lists
+   only the row the library re-installs at run time.
 2. **A concrete `fn` parameter cannot be stored.** Storing one is
    `local-reference-escapes`, whatever the caller passed. Every retained callback
    is a bare type parameter bounded by `'static & Fn/FnMut`, which the library
@@ -81,10 +81,8 @@ defers the flush to its end, with its depth kept on the graph.
 
 **`effect` and `sync`.** `effect` is `FnMut() -> void $ Track` and `sync` adds
 `Mutate`. They are separate because a single row of `$ Track + Mutate` would
-reject the common read-only trailing block, which cannot carry an annotation
-(rule 1). Both run at creation and again at flush when a dependency moved. A block
-that reads only through `untrack` has the empty row, so it is written as an
-explicit closure. Stored bodies are `fn() -> bool $ Reactive`, where `type Reactive
+reject the common read-only trailing block (rule 1). Both run at creation and again
+at flush when a dependency moved. Stored bodies are `fn() -> bool $ Reactive`, where `type Reactive
 = $ Track + Mutate`, and run under a collector plus a `Mutate` provider, so a
 `sync` may write while a memo, bounded `$ Track`, cannot.
 
@@ -197,7 +195,7 @@ changes. It is a `ReadSignal[Resource[T, E]]` of `Loading`, `Ready` or `Failed`.
 
 **Loads go through a host-mediated queue, because nothing else can wait.** The loop
 must serve events while loaders run, but `race!` cancels its losers
-(`req.combinator.race-losers-disposed.using-split`), `all!` has fixed arity, and user code can
+(`req.combinator.race-losers-disposed.using-split`), `join!` takes a fixed set, and user code can
 neither build a `PollContext` nor implement `Suspend` (`req.protocol.builtin`,
 `req.poll-context.user`). So no user-written combinator can poll a changing set of
 loaders, and the only thing that can suspend is a host wait. `Surface` therefore
@@ -227,7 +225,7 @@ every sleep completes at once and a sleeping loader always beats the deadline.
 ## The run loop
 
 `run_app!(root)` lives in each renderer package, since it is the only suspending part.
-It mounts, sends the first batch, then runs `all!(event_loop(), workers())`.
+It mounts, sends the first batch, then runs `join!(event_loop(), workers())`.
 
 - `event_loop!` takes `next_event!`, dispatches, and sends, until an event names
   handler 0. Then it posts job 0. It calls `$.use(Surface)` fresh each time, so no
@@ -236,8 +234,7 @@ It mounts, sends the first batch, then runs `all!(event_loop(), workers())`.
   A worker that takes the stop marker re-posts it while others are live, so one 0 stops
   them all, and a worker mid-load takes it afterwards, so a load in flight at shutdown
   still lands.
-- There are four workers. The count is the number of arguments to `all!`, because `all!`
-  has fixed arity and no task can wait on another.
+- There are four workers. The count is the number of arguments to `join!`.
 
 `Recorder` implements `Surface` in hd for tests: `apply!` logs, `next_event!` pops a
 scripted event or answers handler 0, and `next_job!` answers 0 when empty. Core tests in
@@ -260,13 +257,10 @@ scripted event or answers handler 0, and `next_job!` answers 0 when empty. Core 
 
 | Issue | State | What it means here |
 | --- | --- | --- |
-| [hd-lang#1163](https://github.com/HerringtonDarkholme/hd-lang/issues/1163) | closed | rule 1 |
-| [hd-lang#1164](https://github.com/HerringtonDarkholme/hd-lang/issues/1164) | closed | the job queue on `Surface`, the fixed pool, no in-flight cancellation |
-| [hd-lang#1165](https://github.com/HerringtonDarkholme/hd-lang/issues/1165) | closed | `hd fmt` could produce code the parser rejects, so run `hd check` after it; a closure argument whose body is a trailing-block call is written `f(fn(): ...)` |
-| [hd-lang#1166](https://github.com/HerringtonDarkholme/hd-lang/issues/1166) | closed | `hd fmt` leaves a lone `,` after a multi-line closure argument |
 | [hd-lang#1190](https://github.com/HerringtonDarkholme/hd-lang/issues/1190) | open | a test file that imports nothing from a host-mapped package fails, so it imports one name |
 | [hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191) | open | no native renderer (`rendering.md`) |
 
-The four closed issues are closed upstream, but the code and these notes still describe
-behavior at `cf5040b4a`. Nothing here has been rechecked against a newer `hd`, so the
-workarounds stay until someone does.
+**`hd fmt` can still produce code the parser rejects.** It breaks a long `if` in a struct
+field across lines and leaves a comma the parser refuses, which `Style.merge` in
+`ui/src/style.hd` hits. Run `hd check` after it. So far the tree has not been reformatted
+to the layout `hd fmt` now prefers.

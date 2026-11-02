@@ -1,7 +1,7 @@
 ## The loop that runs a `ui` tree on a `Surface`: mount, send each batch
 ## of commands, dispatch each event, and run resource loads on a pool of
 ## worker tasks.
-use std.task.all
+use std.task.join
 use dep.ui.{OwnerId, Ui, dispatch, mount, run_job, take_commands, take_new_jobs}
 use pkg.surface.Surface
 
@@ -48,10 +48,10 @@ fn started() -> mut Suspend[void] $ Surface:
     worker()
 
 # The pool: four workers, so at most four loads are in flight at once.
-# The count is the number of arguments because `all!` has fixed arity and
+# The count is the number of arguments because `join!` has fixed arity and
 # no task can wait on another (hd-lang#1164), so the pool is not a loop.
 fn workers!() -> void $ Surface:
-    _ := all!(started(), started(), started(), started())
+    _ := join!(started(), started(), started(), started())
 
 ## Mounts `root`, sends its commands, then runs the event loop beside a
 ## pool of workers until the host sends handler 0: each event is
@@ -61,4 +61,4 @@ fn workers!() -> void $ Surface:
 pub fn run_app![$ R](root: fn() -> void $ Ui + R) -> void $ Surface + R:
     _ := mount(root)
     send!()
-    _ := all!(event_loop(), workers())
+    _ := join!(event_loop(), workers())

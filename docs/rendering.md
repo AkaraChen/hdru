@@ -260,7 +260,7 @@ loop, so `printf '\t\rq' | hd run counter-tui` is a test.
 
 A GPUI or other native renderer cannot be bound as a package host trait today: package providers run only on
 JavaScript hosts (`cli.host.package.javascript`), which [hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191)
-tracks. This comes from reading the source at `cf5040b4a`, since this `hd` build has no wasmtime engine to run.
+tracks. This comes from reading the source at `717b76ad8`, since this `hd` build has no wasmtime engine to run.
 
 **`hd_run_wasmtime` is closed in two places.** `WasmtimeEngine::load` refuses any module with an
 `hd.capabilities` section (`engine.rs:240`). Past that, the `Linker` is made and filled inside `instantiate_host`

@@ -45,11 +45,11 @@ it("run_app drives the counter through a scripted surface and stops on handler 0
         run_app!(counter)
     log := recorder.log
     assert_equal(log.len(), 20, reason="17 mount commands and 3 updates")
-    assert_equal(log.get(0), .Some(Command.Create(1, "box")), reason="mount first")
-    assert_equal(log.get(17), .Some(Command.SetText(2, "Count: 1")), reason="first plus")
-    assert_equal(log.get(18), .Some(Command.SetText(2, "Count: 2")), reason="second plus")
+    assert_equal(log.get(0).copied(), .Some(Command.Create(1, "box")), reason="mount first")
+    assert_equal(log.get(17).copied(), .Some(Command.SetText(2, "Count: 1")), reason="first plus")
+    assert_equal(log.get(18).copied(), .Some(Command.SetText(2, "Count: 2")), reason="second plus")
     assert_equal(
-        log.get(19),
+        log.get(19).copied(),
         .Some(Command.SetText(2, "Count: 1")),
         reason="minus; the unknown handler 7 emitted nothing",
     )
@@ -82,9 +82,9 @@ it("a loader that suspends lands through the workers of run_app"):
         run_app!(slow_profile)
     assert_equal(recorder.jobs, [], reason="the posted job and every stop marker were taken")
     log := recorder.log
-    assert_equal(log.get(2), .Some(Command.SetText(1, "loading")), reason="mount")
+    assert_equal(log.get(2).copied(), .Some(Command.SetText(1, "loading")), reason="mount")
     assert_equal(
-        log.get(3),
+        log.get(3).copied(),
         .Some(Command.SetText(1, "ready: slow user 7")),
         reason="a worker drove the sleeping loader and sent its landing",
     )
@@ -122,6 +122,6 @@ it("run_app carries payloads from the surface to the handler"):
         run_app!(form)
     log := recorder.log
     assert_equal(log.len(), 24, reason="20 mount commands, then 1, 1 and 2")
-    assert_equal(log.get(20), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
-    assert_equal(log.get(21), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
-    assert_equal(log.get(22), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
+    assert_equal(log.get(20).copied(), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
+    assert_equal(log.get(21).copied(), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
+    assert_equal(log.get(22).copied(), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
