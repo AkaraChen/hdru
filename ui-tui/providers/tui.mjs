@@ -884,14 +884,30 @@ function openStreams() {
 // becomes an unlinked file for that time: POSIX gives an open the lowest free
 // descriptor, which is how a Node program can do dup2. `drain` puts the terminal
 // back on fd 2 and returns what was written. Null if this cannot be done safely;
-// stderr then stays as it was. A worker needs none of it, and Node warns on the
-// screen if one closes a descriptor it did not open.
+// stderr then stays as it was. A worker closing a descriptor it did not open makes
+// Node warn, on the screen, so that one warning is held back. A worker's report
+// reaches fd 2 through the main thread, so it lands in the file or, if it comes
+// after `drain`, on the restored terminal: either way it is seen.
+function closeQuietly(fd) {
+  const emit = process.emitWarning;
+  process.emitWarning = (warning, ...rest) => {
+    if (!String(warning?.message ?? warning).includes("unmanaged mode")) emit.call(process, warning, ...rest);
+  };
+  try {
+    closeSync(fd);
+  } finally {
+    setImmediate(() => {
+      process.emitWarning = emit;
+    });
+  }
+}
+
 export function captureStderr() {
-  if (!isMainThread || process.platform === "win32" || !isatty(2)) return null;
+  if (process.platform === "win32" || !isatty(2)) return null;
   const path = join(tmpdir(), `hd-ui-tui-${process.pid}-${Date.now()}`);
   try {
     closeSync(openSync("/dev/tty", "w"));
-    closeSync(2);
+    closeQuietly(2);
     const fd = openSync(path, "wx+", 0o600);
     unlinkSync(path);
     if (fd !== 2) {
@@ -906,7 +922,7 @@ export function captureStderr() {
     drain() {
       const bytes = Buffer.alloc(fstatSync(2).size);
       if (bytes.length) readSync(2, bytes, 0, bytes.length, 0);
-      closeSync(2);
+      closeQuietly(2);
       openSync("/dev/tty", "w");
       return bytes.toString("utf8");
     },

@@ -235,7 +235,9 @@ loop, so `printf '\t\rq' | hd run counter-tui` is a test.
   screen and raw mode. Without this a panic would leave stdin holding the process open.
 - While the alternate screen is up, fd 2 is an unlinked file, printed on leaving, so a panic's message
   survives and stderr cannot scribble on the screen. Close 2 and POSIX gives the next open the lowest
-  free descriptor, which is how Node can do `dup2`. This happens only when stderr is a terminal.
+  free descriptor, which is how Node can do `dup2`. This happens only when stderr is a terminal. In a worker,
+  Node's warning about closing a descriptor it did not open is held back, and a report the main thread writes
+  after the swap ends lands on the restored terminal.
 - Keys are read on their own thread, so Ctrl-C is seen even with the main thread stuck in a Wasm loop,
   where in raw mode it is only a byte. If the main thread shows no sign a second later, the thread sends
   SIGKILL.
@@ -247,8 +249,8 @@ loop, so `printf '\t\rq' | hd run counter-tui` is a test.
 
 **Limits:**
 
-- Under `--time-limit`, a panic's first line is lost on a real screen unless stderr is redirected, because
-  closing fd 2 from a worker makes Node print a warning.
+- A Wasm loop past `--time-limit` gets its worker terminated, so nothing prints the captured stderr and its
+  `panic: time-limit` line is lost. The guard says the program was killed, and `2>file` keeps the line.
 - Mouse reporting takes selection from the terminal; most give it back under Shift.
 - While a program is stuck only Ctrl-C works, not `q`, and a synchronous computation over a second counts as
   stuck.
