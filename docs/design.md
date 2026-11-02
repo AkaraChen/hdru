@@ -570,3 +570,187 @@ what existed until then.
   into the provider would not let the provider flush, because a flush runs
   effects and no provider method may run user code (phase 1), so the
   provider would only hold a counter the graph reads.
+
+## Phase 16: a terminal renderer (2026-11-02)
+
+The first non-DOM renderer, and the test of `packages.md`'s claim that a
+second renderer is one more package. It was: nothing in `reactive/` or
+`ui/` changed. Gate met: `hd test` at the root, 64 cases (the 60 before and
+4 in `ui-tui/tests/loop.hd`); `node --test ui-tui/providers/tui.test.mjs`,
+39 cases, one of which runs `hd run counter-tui` over pipes; the three
+examples driven by scripted keys in a real terminal (tmux, truecolor, resize,
+a 40 by 12 window; 256 colors by unit test only); the three DOM examples byte-identical
+under Node against `56a41aa`; `web/build.sh` rebuilt and the pages checked in
+a real browser.
+
+- **`ui-tui` mirrors `ui-dom`.** `surface.hd` has its own `@host trait
+  Surface` with the same four methods; `app.hd` and `recorder.hd` are copies,
+  because the loop is per renderer and the recorder implements this package's
+  trait. The dependency key is `dep.ui_tui`. The copy is about 100 lines and
+  has not yet wanted to differ.
+- **One app, two executables, not `examples/*-tui`.** `spec/cli`'s
+  `[[executable]]` (`cli.exe.several`) fits, and it answers the open question
+  of whether an app can consent to one `Surface` at a time. Probed: a manifest
+  may consent to both, and `hd` binds only the trait the entry's row names
+  (`cli.host.entry-binding`), so neither provider loads under the other. Each
+  example's app moved to `src/lib.hd`; `src/main.hd` and `src/tui.hd` are a few
+  lines each, since an entry module cannot be imported (`cli.exe.entry-no-use`).
+  The cost: `hd run` with two executables needs the name
+  (`cli.run.default.one`), so the old `hd run --engine node` is now `hd run
+  counter --engine node`. `counter.wasm` and `counter.host.mjs` keep their
+  names, so `web/` is untouched.
+- **Layout is an embedded flexbox pass, about 300 lines of `tui.mjs`**, not
+  yoga-layout or taffy-wasm. Those are asynchronous Wasm to load, would be the
+  repo's first npm or vendored binary dependency, and calculate in floats that
+  a cell grid has to round anyway; integer layout is also what makes the
+  shares add up (`share`). `place` is pure and memoized per pass, since a box
+  measures a child and then lays it out, which is exponential in depth
+  otherwise. Followed: `direction`, `gap`, `padding_*`, `margin_*`,
+  `border_width`, `width`/`height` with all four `Size`s, `min_*`/`max_*`,
+  `grow`, `shrink`, `justify`, `align`. Sizes are border box, as React
+  Native's. Text wraps at its box.
+- **Units.** A cell is taken as 8 by 16 logical pixels, the scale
+  `rendering.md` section 7 leaves to the renderer, so `padding(16)` is two
+  columns and one row. `padding_y(4)` rounds to no rows, which is why a bordered
+  button is three rows and not five. Any nonzero border is one cell.
+- **Keys wait until hd asks.** A key is read in `next_event!`, not when it
+  arrives, so each sees the tree the previous key's event left. Read eagerly, a
+  key could append to a value a batch still in flight is about to replace, or
+  act on a row a click is about to remove (reasoned, not observed; the test
+  pins the order). The exception is
+  Ctrl-C, which puts the terminal back at once, whatever hd is doing.
+- **The host's end signal.** A panic leaves `next_event!` pending forever, and
+  stdin held the process open: raw mode, no exit, and neither `q` nor Ctrl-C
+  was read, which would strand a user's shell. A tmux run found this. The provider now listens to the
+  method context's `instanceSignal` (`package-providers.ts`), which the host
+  aborts when the program ends for any reason, and releases the terminal then.
+
+Deviations from `rendering.md`:
+
+- **`color` and `font_weight` inherit.** Section 3 promises no inheritance, but
+  phase 12 already noted that `text_live` takes no style, so the examples style
+  live text through a wrapping `view` and rely on the DOM passing it down. The
+  fetcher's red failure would be lost otherwise. Section 3's "a renderer that
+  does inherit" now describes both renderers; the vocabulary's promise is what
+  should change if a third inherits too.
+- **Text with no color contrasts with its background.** The DOM's default is
+  black on a white page; a terminal's may be light. The fetcher sets
+  `bg(p.surface)` and no color, which would be light on white on a dark
+  terminal. Over no background the terminal's own color stands.
+- **`Fill` across the main axis stretches.** The DOM column says `width: Fill`
+  is `flex: 1 1 0; align-self: stretch` whichever axis the key is on, so in a
+  column it also grows the height, which is a quirk of mapping onto one CSS
+  shorthand. Here `Fill` on the main-axis key grows and on the cross-axis key
+  stretches.
+- **Not followed, and dropped silently:** `wrap` (one line only), `font_size`,
+  `font_family`, `cursor`. `overflow: scroll` clips like `hidden`; the screen
+  itself scrolls to keep the focus in view, since an unreachable button in a
+  long list is a bug and a scrolling box is a feature. `opacity` under 1 is the
+  terminal's dim attribute, not a blend. `radius` above 0 picks rounded corners.
+- **Unknown keys are not logged.** Section 6 allows a log; there is no screen
+  line to spare for one.
+- **`enter` joined the event table.** It was the DOM provider's own since phase
+  13 and the todos example needs it, so a second renderer makes it vocabulary.
+  No property or kind was added.
+
+What the terminal adds that the vocabulary does not name, all inside the
+provider:
+
+- The focus: the first node with a listener has it from the start, since a
+  terminal has no pointer. It is reverse video inside the border, or a cursor
+  in a field. When its node goes it passes to whatever holds its position.
+- A button with neither border nor background is drawn `[label]`, standing in
+  for the DOM's native chrome. Its label is centered, as a DOM button's is.
+- Events bubble to ancestors' listeners, as the DOM's do. `key` payloads are
+  `KeyboardEvent.key` names.
+- `q` ends the loop except in a field, where it is a letter; Ctrl-C always ends
+  it. This narrows the brief's "`q` or Ctrl-C", which would make a todo with a
+  q in it untypable.
+- Off a TTY it prints each changed frame as plain text, and the end of a piped
+  stdin ends the loop, so `printf '\t\rq' | hd run counter-tui` is a test.
+
+Known limits:
+
+- **The panic message is lost on a real screen.** The host writes `panic: ...`
+  straight to fd 2 and only then closes the instance, so the line lands on the
+  alternate screen and disappears with it; `hd`'s stack, printed after the
+  process ends, survives. A provider cannot intercept it (`output.ts` holds
+  `writeSync` from before the provider loads). `hd run counter-tui 2>err.log`
+  keeps it. The fix is upstream: close the instance before reporting, or give
+  a provider a hook that runs first. Not filed yet.
+- **`--time-limit` is not interactive.** A supervised run puts the guest in a
+  worker, whose stdio is not the TTY, so stdin reads as ended: one plain frame
+  and exit 0. Opening `/dev/tty` from the worker might work; nothing needs it.
+- A field edits at its end only: the arrow keys are dropped. There is no mouse,
+  and no selection.
+- A wide character half overwritten by a later paint is not repaired. Layouts
+  in this vocabulary do not overlap, so it has not happened.
+
+### Plan B: what a GPUI renderer would need
+
+Time-boxed reading at `cf5040b4a`, no code written. `hd` here has no wasmtime
+engine, so the two facts about wasmtime's behavior come from its source and its
+tests, not from a run.
+
+**`hd_run_wasmtime` is closed, in two independent places.**
+`WasmtimeEngine::load` refuses any module with an `hd.capabilities` section
+before anything else happens (`engine.rs:240`; this is
+`cli.host.package.native-refusal`). Past that, the `Linker` is made and filled
+inside `instantiate_host` (`engine.rs:141`), imports dispatch through a closed
+`Kind` enum (`host/call.rs`), and the store's `Host` type is private (`mod
+host`). No public API takes an extra import. An embedder cannot get in without a
+change upstream.
+
+**A raw `wasmtime` embedder is possible but is not an open path.** The module
+is small: `counter-tui.wasm` imports exactly seven `hd:pkg:<hash>` functions
+(`apply`, `next_event`, `next_job` as `.start`/`.finish` pairs, and `post_job`)
+and four from `hd:rt` (`abort`, `hash_seed`, `panic`, `stderr`), and exports
+`hd.init`, `hd.poll`, `hd.wake`. `hd_host_abi::schema::from_wasm` is public and
+returns the checked `Contract` for those imports. So a Rust program using the
+`wasmtime` crate directly could link them and drive the poll loop, skipping
+`hd_run_wasmtime` and with it the refusal. What it would have to own:
+
+- The exchange-buffer codec for `Value`, which exists only as generated
+  JavaScript (`hd_host_abi/src/javascript.rs`, `Enc`/`Dec` in
+  `host/package-providers.ts`). This is the bulk of it.
+- The driver: `hd.poll`, wakes, pending operations, the deadlock report.
+- Every other host trait the app names, reimplemented: the fetcher adds
+  `hd:Clock`, which is private to `hd_run_wasmtime` too.
+- Consent, since `cli.host.package.invoker` would now be the embedder.
+
+The schema is "toolchain ABI v1" with `RUNTIME_ABI_REVISION`, the crates are
+path-only, and the `<hash>` in the module name is a directory hash. All of it
+would break silently on a toolchain update. That is not "clearly open", so no
+crate was started.
+
+**What hd-lang#1191 should decide.** In its order:
+
+1. **Binding shape: a generated Rust trait plus codec, passed to an engine API
+   at instantiation.** This is the analogue of `NAME.host.mjs`, and the
+   generator already has its input (`Contract`). A dylib loaded from a manifest
+   path adds loading and ABI-stability problems that a GUI does not need,
+   because a GPUI app is a Rust binary that owns `main` anyway; it embeds hd, not
+   the reverse. So the entry point is `hd_run_wasmtime` as a library, with one
+   new public hook, and the load refusal scoped to "no provider registered".
+2. **Consent stays as it is.** `[capabilities] "dep.ui_gpui.surface.Surface" =
+   true`, checked by the embedder as the invoker. Nothing about a native
+   provider changes what an app agrees to.
+3. **Value conversion: mirror `module.host.package.js-values`.** Enums with
+   named payload fields become Rust enums with the same names, which is why
+   `rendering.md` named those fields. Optionals, lists and handles map directly.
+4. **Who owns the thread.** The question the issue does not ask yet, and the one
+   GPUI raises. GPUI runs its platform event loop on the main thread, and the
+   guest's `next_event!` must not block it. A `.start` returning pending plus a
+   later wake fits a foreground executor, but only if the engine exposes "poll
+   this instance now" to the embedder instead of owning the loop, as `run` does
+   today. Without it the guest needs its own thread, and every `apply!` crosses
+   threads to reach GPUI's `App`.
+5. **A smaller first step:** a public `hd_run::Engine`-level way to run a module
+   with extra imports, even unstable, would let `ui-gpui` start without settling
+   generated traits, at the cost of a hand-written codec.
+
+What `ui-tui` shows for such a renderer: the protocol needed no change, and
+the provider's split (retained tree, then pure layout, then paint) is the shape
+a GPUI provider would keep, with taffy in place of `place` and GPUI's own focus
+in place of the provider's. The vocabulary's units and `Fill` rule apply as they
+stand. The unknowns left are all on the host side.

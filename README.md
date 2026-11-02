@@ -2,10 +2,10 @@
 
 Run-once components, signal handles, memos, effects, an owner tree, keyed
 collections, and a command stream over the Wasm boundary to a small DOM
-adapter. `docs/bootstrap.md` is the plan that built phases 0 to 8,
+adapter or a terminal. `docs/bootstrap.md` is the plan that built phases 0 to 8,
 `docs/design.md` the record of what was built and why, `docs/roadmap.md`
 what comes next, `docs/rendering.md` the renderer protocol and style
-design, and `docs/packages.md` the split into three packages:
+design, and `docs/packages.md` the split into packages:
 
 - `reactive`: signals, memos, effects, owners, context. No nodes, no host.
 - `ui`: the `Ui` row, builders, `show`, `for_each`, inputs, resources,
@@ -13,9 +13,11 @@ design, and `docs/packages.md` the split into three packages:
   user-facing names. No host trait.
 - `ui-dom`: the `Surface` host trait, `run_app!` with its event loop and
   worker pool, `Recorder`, and the JavaScript provider.
+- `ui-tui`: the same four things for a terminal, on Node.
 
-An app depends on `ui` and `ui-dom` and consents to
-`"dep.ui_dom.surface.Surface" = true` in its manifest.
+An app depends on `ui` and a renderer and consents to its host trait, such as
+`"dep.ui_dom.surface.Surface" = true`, in its manifest. To run on either, it
+puts the app in `src/lib.hd` and declares one `[[executable]]` per renderer.
 
 ```hd
 use dep.ui.{Style, Ui, button, column, row, signal, text_live}
@@ -77,16 +79,25 @@ Tests run on the Node engine only; wasmtime is out of scope for now.
 | What | Command |
 | --- | --- |
 | every package's tests (node), from the root | `hd test` |
-| one package | `hd test -p reactive` (or `ui`, `ui-dom`) |
-| provider tests | `node --test ui-dom/providers/dom.test.mjs` |
-| the counter under Node, three scripted clicks | `cd examples/counter && UI_CLICKS=2,2,1 hd run --engine node` |
-| the todos demo under Node | `cd examples/todos && UI_CLICKS=1,8=milk,10 hd run --engine node` (toggle, type "milk" and press Enter, reverse) |
-| the fetcher demo under Node (a resource with a delayed loader) | `cd examples/fetcher && UI_CLICKS=2,2 hd run --engine node` |
+| one package | `hd test -p reactive` (or `ui`, `ui-dom`, `ui-tui`) |
+| provider tests | `node --test ui-dom/providers/dom.test.mjs ui-tui/providers/tui.test.mjs` |
+| the counter in a terminal | `cd examples/counter && hd run counter-tui` |
+| the todos demo in a terminal | `cd examples/todos && hd run todos-tui` |
+| the fetcher demo in a terminal | `cd examples/fetcher && hd run fetcher-tui` |
+| a terminal app driven by keys, printing plain frames | `cd examples/counter && printf '\t\rq' \| hd run counter-tui` |
+| the counter under Node, DOM provider, three scripted clicks | `cd examples/counter && UI_CLICKS=2,2,1 hd run counter --engine node` |
+| the todos demo under Node, DOM provider | `cd examples/todos && UI_CLICKS=1,8=milk,10 hd run todos --engine node` (toggle, type "milk" and press Enter, reverse) |
+| the fetcher demo under Node, DOM provider (a resource with a delayed loader) | `cd examples/fetcher && UI_CLICKS=2,2 hd run fetcher --engine node` |
 | the browser pages | `./web/build.sh`, then serve `web/` (for example `python3 -m http.server -d web 8765`) and open `index.html` or `todos.html` |
+
+In a terminal: Tab and Shift-Tab move the focus, Enter and Space click, typing
+edits a focused field, Space toggles a checkbox, and `q` (outside a field) or
+Ctrl-C quits. A panic's message goes to stderr while the alternate screen is up,
+so run with `2>err.log` when chasing one.
 
 ## Layout
 
-- `hd.toml` the workspace: `reactive`, `ui`, `ui-dom` and the three examples
+- `hd.toml` the workspace: `reactive`, `ui`, `ui-dom`, `ui-tui` and the three examples
 - `reactive/src/keys.hd` ids, the `Track`/`Mutate`/`Owner` keys and their providers
 - `reactive/src/graph.hd` the program-wide dependency graph and owner tree, and the low-level API (`run_effect`, `cleanup_on`, `new_owner`, `dispose`)
 - `reactive/src/reactive.hd` `signal`, `memo`, `effect`, `sync`, `batch`, `untrack`, `assert_no_writes`
@@ -98,4 +109,5 @@ Tests run on the Node engine only; wasmtime is out of scope for now.
 - `ui/src/runtime.hd` `mount`, `dispatch`, `take_commands`, the handler and job tables, `run_job!`
 - `ui-dom/src/surface.hd` the `@host Surface` trait; `ui-dom/src/app.hd` `run_app!` and the worker pool; `ui-dom/src/recorder.hd` an hd `Surface` for tests
 - `ui-dom/providers/dom.mjs` the provider: real DOM in a browser, a printing in-memory tree elsewhere; `ui-dom/providers/dom.test.mjs` its Node test
-- `examples/counter` (with a dark-mode switch), `examples/todos`, `examples/fetcher`, `web/` (pages share a reset, `web/style.css`)
+- `ui-tui/src/` the same three files for a terminal; `ui-tui/providers/tui.mjs` the provider: retained tree, flexbox pass, cell painter, keys and focus; `ui-tui/providers/tui.test.mjs` its Node test
+- `examples/counter` (with a dark-mode switch), `examples/todos`, `examples/fetcher`: the app in `src/lib.hd`, the entries in `src/main.hd` (DOM) and `src/tui.hd` (terminal); `web/` (pages share a reset, `web/style.css`)

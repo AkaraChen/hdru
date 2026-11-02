@@ -43,7 +43,8 @@ hdru/
   reactive/                layer 1
   ui/                      layer 2 types and layer 3 vocabulary
   ui-dom/                  the DOM renderer: host trait, loop, provider
-  examples/counter ...     apps: depend on ui and ui-dom
+  ui-tui/                  the terminal renderer: the same shape on Node
+  examples/counter ...     apps: depend on ui, ui-dom and ui-tui
   web/                     browser pages for the examples
   docs/
 ```
@@ -53,12 +54,14 @@ hdru/
 | `reactive` | `dep.reactive` | the `Owner`, `Track`, `Mutate` keys and the `Reactive` alias, graph, `signal`/`memo`/`effect`/`sync`/`batch`/`untrack`, owners (`root`, `owned`, `on_cleanup`), `Provided`/`given` and the owner-tree `provide`/`use_context` | none | node, wasmtime |
 | `ui` | `dep.ui` | the `Parent` key, `Scope`, and the row alias `type Ui = $ Owner + Parent`; the protocol types `Command`, `PropValue`, `Color`, `Size`, `UiEvent` (`protocol.hd`); `Style` (`style.hd`); `Theme` (`theme.hd`); builders, `show`, `for_each`, inputs, `resource`; `mount`, `dispatch`, `take_commands`, `run_job!`, the handler and job tables. Re-exports `reactive`'s user-facing names | none | node, wasmtime |
 | `ui-dom` | `dep.ui_dom` | `surface.hd` (`@host trait Surface`), `app.hd` (`run_app!` with the event loop and worker pool), `recorder.hd` (`Recorder`, `scripted`), `providers/dom.mjs` and its Node test | `surface.Surface` → `providers/dom.mjs` | node only |
-| `examples/*` | | one app each; `[dependencies] ui, ui_dom`; `[capabilities] "dep.ui_dom.surface.Surface" = true` | | node, browser |
+| `ui-tui` | `dep.ui_tui` | the same as `ui-dom`: `surface.hd`, `app.hd`, `recorder.hd`; `providers/tui.mjs` with its flexbox pass, painter and keys, and its Node test | `surface.Surface` → `providers/tui.mjs` | node only |
+| `examples/*` | | one app each in `src/lib.hd`, with two executables: `NAME` (`src/main.hd`, `ui-dom`) and `NAME-tui` (`src/tui.hd`, `ui-tui`); `[capabilities]` consents to both `Surface`s | | node, browser, terminal |
 
 Later siblings, each a package with its own host trait and loop:
-`ui-canvas` (JavaScript, when a second renderer is wanted), `ui-gpui` or
-another native one (blocked on native package providers in hd-lang), and
-`ui-kit` for components built on `ui` with no host trait.
+`ui-canvas` (JavaScript, if ever wanted), `ui-gpui` or another native one
+(blocked on native package providers, hd-lang#1191; `design.md`, phase 16, has
+what it would need), and `ui-kit` for components built on `ui` with no host
+trait.
 
 ### What moves where
 
@@ -130,7 +133,7 @@ not re-export it.
 ```toml
 # hdru/hd.toml
 [workspace]
-members = ["reactive", "ui", "ui-dom", "examples/counter", "examples/todos", "examples/fetcher"]
+members = ["reactive", "ui", "ui-dom", "ui-tui", "examples/counter", "examples/todos", "examples/fetcher"]
 ```
 
 ```toml
@@ -162,10 +165,24 @@ name = "counter"
 [dependencies]
 ui = { path = "../../ui", version = "0.1.0" }
 ui-dom = { path = "../../ui-dom", version = "0.1.0" }
+ui-tui = { path = "../../ui-tui", version = "0.1.0" }
 
 [capabilities]
 "dep.ui_dom.surface.Surface" = true
+"dep.ui_tui.surface.Surface" = true
+
+[[executable]]
+name = "counter"
+module = "main"
+
+[[executable]]
+name = "counter-tui"
+module = "tui"
 ```
+
+An app may consent to several renderers: `hd` binds only the host trait the
+entry's row names (`cli.host.entry-binding`), so `counter-tui` never loads
+`dom.mjs`.
 
 - Path requirements carry a `version` so a tagged release needs no
   manifest edit (`module.version.no-bare-path-release`,
@@ -177,13 +194,14 @@ ui-dom = { path = "../../ui-dom", version = "0.1.0" }
   `tests/policy.hd`, whose timeout must really wait, and `ui-dom` for its
   loop tests.
 - Tags are per package directory: `reactive/v0.1.0`, `ui/v0.1.0`,
-  `ui-dom/v0.1.0` (`module.version.tag-prefix`). The three move together
+  `ui-dom/v0.1.0`, `ui-tui/v0.1.0` (`module.version.tag-prefix`). They move together
   at first; they can diverge once `reactive` is stable.
 - A dependency key with `-` is spelled with `_` in source and in
   capability paths: `ui-dom` is `dep.ui_dom`.
 - One `hd.sum` at the root, empty while every dependency is a path.
 - The examples are members so `hd test` at the root runs everything and
-  `hd run -p counter counter` works from anywhere in the tree.
+  `hd run -p counter counter` (or `counter-tui`) works from anywhere in the
+  tree.
 
 ## 4. Commands after the split
 
@@ -191,8 +209,10 @@ ui-dom = { path = "../../ui-dom", version = "0.1.0" }
 | --- | --- |
 | everything | `hd test` at the root |
 | one package | `hd test -p reactive` |
+| the terminal provider | `node --test ui-tui/providers/tui.test.mjs` |
 | the core on wasmtime, once that engine is built | `hd test -p reactive --engine wasmtime`, same for `ui` |
-| an example under Node | `cd examples/counter && UI_CLICKS=2,2,1 hd run --engine node` |
+| an example under Node, DOM provider | `cd examples/counter && UI_CLICKS=2,2,1 hd run counter --engine node` |
+| an example in the terminal | `cd examples/counter && hd run counter-tui` |
 | the browser pages | `./web/build.sh`, which now takes the provider from `ui-dom/providers/dom.mjs` |
 
 ## 5. Decisions recorded
@@ -249,3 +269,6 @@ Recorded with their reasons in `design.md`, phase 11:
 - `reactive`'s low-level export list is the one in section 2, with
   `State`, `run_effect` and `reset_graph_for_test` added for `ui`'s
   runtime and tests.
+- The second renderer, `ui-tui` (phase 16), came as the design said: one more
+  package, nothing changed in `reactive` or `ui`. Examples got a second
+  executable rather than a second package, so their `hd run` now takes a name.

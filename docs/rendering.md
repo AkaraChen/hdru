@@ -26,7 +26,7 @@ strategy, is what carries portability.
 | Layer | React | Solid | This package | hd package (`packages.md`) |
 | --- | --- | --- | --- | --- |
 | 1 Reactive core | reconciler, Fiber | signals, owners | `graph.hd`, `reactive.hd`, `owner.hd`: done | `reactive` |
-| 2 Renderer protocol | host config | `createRenderer` table | the `Surface` command stream: done, but carries DOM words | types in `ui`; the `@host` trait and loop in each renderer package (`ui-dom`) |
+| 2 Renderer protocol | host config | `createRenderer` table | the `Surface` command stream: done, but carries DOM words | types in `ui`; the `@host` trait and loop in each renderer package (`ui-dom`, `ui-tui`) |
 | 3 Vocabulary | `div`/`className` vs `View`/`style` | `solid-js/web` | not defined; this document | `ui` |
 
 Rule that follows: **layer 2 carries no vocabulary.** Node kinds, event
@@ -121,8 +121,16 @@ maps onto CSS without loss.
 
 ### Events
 
-`click`, `input`, `change`, `key`. Payload: empty for `click`, the value
-for `input` and `change`, the key name for `key`.
+| event | payload | DOM | terminal |
+| --- | --- | --- | --- |
+| `click` | empty | `click` | Enter or Space on the focus |
+| `input` | the field's text | `input` | typing in a focused field |
+| `change` | `"true"` / `"false"` | `change` | Space on a focused checkbox |
+| `key` | the key name, as `KeyboardEvent.key` | `keydown` | any key on the focus but Tab, Shift-Tab and the quit keys |
+| `enter` | the field's text | `keydown` of Enter | Enter in a focused field |
+
+`enter` came from the todos example in phase 13 and joined this table in phase
+16, when a second renderer needed it. Events bubble on both renderers.
 
 ### Properties
 
@@ -279,7 +287,7 @@ changes, drawing is the renderer's cadence. Unknown kinds render as
 Open: whether `Edges` should also cross the boundary as one value (fewer
 commands) or stay four keys (smaller `PropValue`); whether `button` and
 `input` should be boxes with a `role` key instead of kinds; the first
-non-DOM renderer decides both.
+non-DOM renderer decides both. It has: see section 10.
 
 ## 8. Probe (2026-11-02, `cf5040b4a`, `hd test`: 3 passed)
 
@@ -390,3 +398,30 @@ Recorded with their reasons in `design.md`, phase 12:
   fields cross the ABI by name (section 2).
 - `SetText` applies to `"button"` nodes as well as `"text"`.
 - `attr` / `attr_live` survive as the `dom:attr:NAME` escape hatch.
+
+## 10. The first non-DOM renderer (`ui-tui`, phase 16)
+
+`ui-tui/providers/tui.mjs` implements layers 2 and 3 for a terminal, with no
+change to the protocol, to `Style` or to the kinds and keys. Reasons and limits
+are in `design.md`, phase 16. What it decided or changed here:
+
+- **Edges stay four keys.** The provider reads each by name and four
+  `SetProp`s cost nothing a batch notices.
+- **`button` and `input` stay kinds.** The terminal draws them differently from
+  a box: a centered label and brackets, a cursor and a field that keeps its own
+  text. A `role` key would carry the same switch with less checking.
+- **Unknown `dom:` keys need no special case:** a key with any prefix is another
+  renderer's.
+- **`color` and `font_weight` inherit** on the terminal as on the DOM (section
+  3 promises neither), because `text_live` takes no style and the examples style
+  live text from a wrapping `view`.
+- **`Fill` follows the axis:** on the main-axis key it grows, on the cross-axis
+  key it stretches. The DOM provider applies both to either key, a quirk of its
+  one CSS shorthand, so a `width: Fill` in a column also grows there.
+- **Scale:** a cell is 8 by 16 logical pixels; any nonzero border is one cell.
+- **Not followed:** `wrap`, `font_size`, `font_family`, `cursor`. `overflow:
+  scroll` clips as `hidden` does, and `opacity` under 1 is the dim attribute.
+
+The vocabulary's promise of "no inheritance" is now true of neither renderer
+that exists. Whether to promise inheritance of `color` instead is worth deciding
+before a third; `text_live` taking a style would remove the need.
