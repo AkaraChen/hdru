@@ -604,6 +604,69 @@ test("the jobs queue answers workers in order, and holds a job no one waits for"
   assert.equal(await waiter, 0);
 });
 
+test("a field edits at its cursor, which hd replacing the text puts back at the end", async () => {
+  const { surface, terminal } = surfaceOf(form);
+  const typed = async (bytes) => (await eventsAfter(surface, terminal, bytes)).map((event) => event.payload);
+  assert.deepEqual(await typed("ac"), ["a", "ac"]);
+  assert.deepEqual(await typed("\x1b[Db"), ["abc"], "ArrowLeft, then an insert");
+  assert.deepEqual(await typed("\x7f"), ["ac"], "Backspace before the cursor");
+  assert.deepEqual(await typed("\x1b[3~"), ["a"], "Delete under it");
+  assert.deepEqual(await typed("\x1b[H"), [], "Home moves only");
+  assert.deepEqual(await typed("z"), ["za"]);
+  assert.deepEqual(await typed("\x1b[Fy"), ["zay"], "End");
+  surface.apply([set(2, "value", word("new"))]);
+  assert.deepEqual(await typed("!"), ["new!"]);
+  assert.deepEqual(await typed("\x1b[H\x7f"), [], "Backspace at the start is nothing");
+});
+
+test("a long field keeps its cursor in view", async () => {
+  const { surface, terminal } = surfaceOf([...column(1), create(2, "input"), append(1, 2), set(2, "width", extent("Px", 48)), listen(2, "input", 1), set(2, "value", word("abcdefghij"))]);
+  assert.equal(plainRows(surface.frame())[0], "fghij");
+  await eventsAfter(surface, terminal, "\x1b[H");
+  assert.equal(plainRows(surface.frame())[0], "abcdef");
+  const cursor = surface.frame().at(0, 0);
+  assert.equal(cursor.reverse, true, "the cursor is on the first letter");
+});
+
+test("the mouse: a left press focuses and clicks; a field only takes the focus", async () => {
+  const { surface, terminal } = surfaceOf(form);
+  const press = (x, y) => `\x1b[<0;${x + 1};${y + 1}M`;
+  assert.deepEqual(parseKeys(press(3, 4) + "\x1b[<0;4;5m\x1b[<64;4;5M\x1b[<2;4;5M").keys, ["Mouse:3:4"], "no release, wheel or right button");
+  assert.deepEqual(await eventsAfter(surface, terminal, press(1, 2)), [{ handler: 13, payload: "" }], "the go button");
+  assert.equal(surface.focused().id, 4);
+  assert.deepEqual(await eventsAfter(surface, terminal, press(1, 1)), [{ handler: 12, payload: "true" }], "the checkbox toggles");
+  assert.deepEqual(await eventsAfter(surface, terminal, press(1, 0)), [], "the field");
+  assert.equal(surface.focused().id, 2);
+  assert.deepEqual(await eventsAfter(surface, terminal, press(1, 3)), [], "disabled");
+  assert.deepEqual(await eventsAfter(surface, terminal, press(1, 4)), [], "a label with no listener");
+  assert.equal(surface.focused().id, 2, "the focus stays");
+});
+
+test("the mouse counts scroll", async () => {
+  const items = [];
+  for (let i = 0; i < 10; i += 1) items.push(create(10 + i, "button"), append(1, 10 + i), setText(10 + i, `b${i}`), listen(10 + i, "click", 10 + i));
+  const { surface, terminal } = surfaceOf([...column(1), ...items], { rows: 3, cols: 10 });
+  await eventsAfter(surface, terminal, "\t".repeat(9));
+  assert.deepEqual(await eventsAfter(surface, terminal, "\x1b[<0;1;1M"), [{ handler: 17, payload: "" }], "the top row shows b7");
+});
+
+test("a glyph over half of a wide one blanks the other half", () => {
+  const tree = treeOf([
+    ...column(1),
+    set(1, "height", extent("Px", 16)),
+    ...label(2, 1, "中文"),
+    create(3, "box"),
+    append(1, 3),
+    set(3, "margin_top", num(-16)),
+    set(3, "margin_left", num(8)),
+    set(3, "background", paintOf(1, 1, 1)),
+    set(3, "width", extent("Px", 8)),
+    set(3, "height", extent("Px", 16)),
+  ]);
+  const grid = paint(layout(tree.root, 6, 1), 6, 1);
+  assert.deepEqual([0, 1, 2, 3].map((x) => grid.at(x, 0).ch), [" ", " ", "文", ""]);
+});
+
 // ---- The screen ----------------------------------------------------------
 
 test("a screen is written row by row, and only rows that changed", () => {

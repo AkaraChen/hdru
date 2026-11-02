@@ -90,10 +90,10 @@ Tests run on the Node engine only; wasmtime is out of scope for now.
 | the fetcher demo under Node, DOM provider (a resource with a delayed loader) | `cd examples/fetcher && UI_CLICKS=2,2 hd run fetcher --engine node` |
 | the browser pages | `./web/build.sh`, then serve `web/` (for example `python3 -m http.server -d web 8765`) and open `index.html` or `todos.html` |
 
-In a terminal: Tab and Shift-Tab move the focus, Enter and Space click, typing
-edits a focused field, Space toggles a checkbox, and `q` (outside a field) or
-Ctrl-C quits. A panic's message goes to stderr while the alternate screen is up,
-so run with `2>err.log` when chasing one.
+In a terminal: Tab and Shift-Tab move the focus, Enter and Space click, a left
+press focuses and clicks, typing edits a focused field (with Left, Right, Home,
+End, Backspace and Delete), Space toggles a checkbox, and `q` (outside a field)
+or Ctrl-C quits.
 
 ## Layout
 

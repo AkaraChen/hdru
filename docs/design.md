@@ -577,9 +577,9 @@ The first non-DOM renderer, and the test of `packages.md`'s claim that a
 second renderer is one more package. It was: nothing in `reactive/` or
 `ui/` changed. Gate met: `hd test` at the root, 64 cases (the 60 before and
 4 in `ui-tui/tests/loop.hd`); `node --test ui-tui/providers/tui.test.mjs`,
-39 cases, one of which runs `hd run counter-tui` over pipes; the three
-examples driven by scripted keys in a real terminal (tmux, truecolor, resize,
-a 40 by 12 window; 256 colors by unit test only); the three DOM examples byte-identical
+44 cases, one of which runs `hd run counter-tui` over pipes; the three
+examples driven by scripted keys in a real terminal (tmux, truecolor and 256
+colors, resize, a 40 by 12 window); the three DOM examples byte-identical
 under Node against `56a41aa`; `web/build.sh` rebuilt and the pages checked in
 a real browser.
 
@@ -669,26 +669,44 @@ provider:
 - Off a TTY it prints each changed frame as plain text, and the end of a piped
   stdin ends the loop, so `printf '\t\rq' | hd run counter-tui` is a test.
 
+Handled in the provider, once it was clear none of them waits on upstream:
+
+- **A panic's message survives.** A panic stub writes `panic: ...` through
+  `hd:rt` before it traps, and the host closes the instance only after the run
+  (`run.ts`, in a `finally`), so the line used to land on the alternate screen
+  and vanish with it. A provider cannot intercept the host's write, but it can
+  move what the write reaches: for the time of the screen, fd 2 is an unlinked
+  file (close 2, and POSIX gives the next open the lowest free descriptor, which
+  is how Node can do `dup2`). Leaving the screen puts the terminal back on fd 2
+  and prints the file. So the message comes first and `hd`'s stack after it, and
+  anything else on stderr no longer scribbles on the screen. Only when stderr
+  is a terminal; `2>file` is left alone.
+- **`--time-limit` is interactive.** A supervised run puts the guest in a worker,
+  whose `process.stdin` is not the real one, so the provider opens fds 0 and 1
+  itself, as `host/input.ts` does. A worker hears no SIGWINCH, so it polls the
+  size. If the deadline passes while it waits for a key, the host ends the run
+  and the terminal comes back.
+- **A field has a cursor:** Left, Right, Home, End, Backspace and Delete, by
+  grapheme, and the visible part follows it. hd replacing the text puts it at
+  the end.
+- **The mouse:** a left press focuses the nearest listening node under it and
+  clicks it; a field only takes the focus. It counts the screen's scroll. Mouse
+  reporting takes selection from the terminal, which most give back under Shift.
+- **A wide glyph half overwritten** blanks its other half.
+
 Known limits:
 
-- **The panic message is lost on a real screen.** A panic stub writes its
-  `panic: ...` report through `hd:rt`'s `panic` and `stderr` imports before it
-  traps, and the host closes the instance only after the run (`run.ts`, in a
-  `finally`). So the line lands on the alternate screen and disappears with it;
-  `hd`'s stack, printed after the process ends, survives. A provider cannot
-  intercept the write (`output.ts` holds `writeSync` from before the provider
-  loads). `hd run counter-tui 2>err.log` keeps it. This breaks no rule of the
-  host's: it is the alternate screen that discards the line, so it is a missing
-  feature and not an upstream bug. Reordering the close would not help, since
-  the guest writes the report itself. What would is the host telling a provider
-  before it writes `panic: `. Not filed.
-- **`--time-limit` is not interactive.** A supervised run puts the guest in a
-  worker, whose stdio is not the TTY, so stdin reads as ended: one plain frame
-  and exit 0. Opening `/dev/tty` from the worker might work; nothing needs it.
-- A field edits at its end only: the arrow keys are dropped. There is no mouse,
-  and no selection.
-- A wide character half overwritten by a later paint is not repaired. Layouts
-  in this vocabulary do not overlap, so it has not happened.
+- **Under `--time-limit`, a panic's first line is still lost on a real screen,
+  unless stderr is redirected.** Closing fd 2 from a worker makes Node print a
+  warning onto the screen, so there is no capture there, and the main thread
+  writes the line while the screen is up. The stack and status 3 survive, and
+  `2>file` keeps the line.
+- A busy loop in Wasm past `--time-limit` gets the worker terminated with no
+  chance to run the provider, which would leave the terminal raw. Not tried; the
+  provider has no hook for it.
+- No scrolling inside a box, and no text selection in a field.
+- The fd 2 swap, the worker path and real mouse input were checked by hand in
+  tmux. The unit tests cannot reach them, since they need a real terminal.
 
 ### Plan B: what a GPUI renderer would need
 

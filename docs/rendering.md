@@ -123,7 +123,7 @@ maps onto CSS without loss.
 
 | event | payload | DOM | terminal |
 | --- | --- | --- | --- |
-| `click` | empty | `click` | Enter or Space on the focus |
+| `click` | empty | `click` | Enter or Space on the focus, or a left press |
 | `input` | the field's text | `input` | typing in a focused field |
 | `change` | `"true"` / `"false"` | `change` | Space on a focused checkbox |
 | `key` | the key name, as `KeyboardEvent.key` | `keydown` | any key on the focus but Tab, Shift-Tab and the quit keys |

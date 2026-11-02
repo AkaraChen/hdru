@@ -4,8 +4,8 @@
 // small flexbox pass below, paints it into a grid of cells, and writes the
 // rows that changed as ANSI. Key presses become the protocol's events: Tab
 // and Shift-Tab move the focus, Enter and Space click, typing edits a field,
-// Space toggles a checkbox, and `q` (outside a field) or Ctrl-C sends
-// handler 0.
+// Space toggles a checkbox, a left press focuses and clicks, and `q` (outside
+// a field) or Ctrl-C sends handler 0.
 //
 // With stdout not a terminal it prints each changed frame as plain text, and
 // stdin may be a pipe, whose end also sends handler 0:
@@ -19,6 +19,13 @@
 // Commands arrive as { tag, fields }; see ui-dom/providers/dom.mjs. Each part
 // is exported for providers/tui.test.mjs, which needs no terminal; importing
 // this module touches nothing until the first `apply`.
+
+import { closeSync, createReadStream, fstatSync, openSync, readSync, unlinkSync, writeSync } from "node:fs";
+import { Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ReadStream, WriteStream, isatty } from "node:tty";
+import { isMainThread } from "node:worker_threads";
 
 // ---- Units ---------------------------------------------------------------
 //
@@ -115,7 +122,7 @@ export function wrapText(text, limit = null) {
 const KINDS = new Set(["box", "text", "button", "input", "checkbox", "fragment"]);
 
 function newNode(id, kind) {
-  return { id, kind, parent: null, children: [], text: "", props: new Map(), listeners: new Map() };
+  return { id, kind, parent: null, children: [], text: "", props: new Map(), listeners: new Map(), cursor: null };
 }
 
 // The tree the commands describe. Node 0 is the terminal's root, a column.
@@ -180,6 +187,8 @@ export function createTree() {
       case "SetProp":
         // A prefixed key belongs to another renderer.
         if (f.key.includes(":")) break;
+        // hd replacing a field's text puts the cursor back at its end.
+        if (f.key === "value") node(f.node).cursor = null;
         if (f.value.tag === "Unset") node(f.node).props.delete(f.key);
         else node(f.node).props.set(f.key, f.value);
         break;
@@ -540,6 +549,7 @@ class Grid {
     if (color.a === 0) return;
     for (let cy = Math.max(y, clip[1]); cy < Math.min(y + h, clip[3]); cy += 1) {
       for (let cx = Math.max(x, clip[0]); cx < Math.min(x + w, clip[2]); cx += 1) {
+        this.repair(cx, cy);
         const cell = this.cells[cy][cx];
         cell.bg = blend(color, cell.bg);
         cell.ch = " ";
@@ -547,10 +557,20 @@ class Grid {
       }
     }
   }
+  // Blanks the other half of a wide glyph that a write at (x, y) cuts in two.
+  repair(x, y) {
+    const row = this.cells[y];
+    if (row[x].ch === "" && x > 0) row[x - 1].ch = " ";
+    if (x + 1 < row.length && row[x + 1].ch === "") row[x + 1].ch = " ";
+  }
   // One glyph of `width` cells; a wide one that cannot fit shows as a blank.
   put(x, y, glyph, width, style, clip) {
     if (y < clip[1] || y >= clip[3] || x >= clip[2] || x + width <= clip[0]) return;
     const fits = x >= clip[0] && x + width <= clip[2];
+    for (let i = 0; i < width; i += 1) {
+      const cx = x + i;
+      if (cx >= clip[0] && cx < clip[2]) this.repair(cx, y);
+    }
     for (let i = 0; i < width; i += 1) {
       const cx = x + i;
       if (cx < clip[0] || cx >= clip[2]) continue;
@@ -598,11 +618,14 @@ function drawBorder(grid, x, y, w, h, node, style, clip) {
   grid.put(x + w - 1, y + h - 1, glyphs[3], 1, border, clip);
 }
 
-// The tail of `value` that fits `room` cells, leaving the last for the cursor.
-function fieldTail(value, room) {
+// What a field of `room` cells shows of `value` with its cursor at grapheme
+// `at`: as much as fits up to the cursor, leaving a cell for it, then whatever
+// follows. `width` is the cursor's column.
+function fieldWindow(value, at, room) {
   const parts = graphemes(value);
+  const cursor = Math.min(at ?? parts.length, parts.length);
   let width = 0;
-  let start = parts.length;
+  let start = cursor;
   while (start > 0) {
     const cells = graphemeWidth(parts[start - 1]);
     if (width + cells > room - 1) break;
@@ -633,7 +656,7 @@ function paintBox(grid, box, ox, oy, clip, focus) {
   const ih = Math.max(0, h - e.top - e.bottom);
   const dim = style.dim || flag(node, "disabled");
   if (node.kind === "input") {
-    const tail = fieldTail(word(node, "value") ?? "", iw);
+    const tail = fieldWindow(word(node, "value") ?? "", node.cursor, iw);
     const field = { ...style, dim };
     grid.text(x + e.left, y + e.top, tail.text, field, inner);
     if (!hasBorder) grid.mark(x + e.left, y + e.top, iw, 1, "underline", inner);
@@ -667,6 +690,18 @@ function boxOf(box, node, ox = 0, oy = 0) {
     if (found) return found;
   }
   return null;
+}
+
+// The innermost box at a point of the page, the last painted if they overlap.
+function boxAt(box, px, py, ox = 0, oy = 0) {
+  const x = ox + box.x;
+  const y = oy + box.y;
+  // Children first: a page taller than the screen overflows the root.
+  for (let i = box.kids.length - 1; i >= 0; i -= 1) {
+    const found = boxAt(box.kids[i], px, py, x, y);
+    if (found) return found;
+  }
+  return px < x || py < y || px >= x + box.w || py >= y + box.h ? null : box;
 }
 
 // The bottom of the laid-out page, which may lie past the screen.
@@ -776,7 +811,10 @@ export function parseKeys(text) {
     if (rest[0] === "\x1b") {
       const sequence = escapeAt(rest);
       if (sequence === "") return { keys, rest };
-      if (SEQUENCES.has(sequence)) keys.push(SEQUENCES.get(sequence));
+      const mouse = /^\x1b\[<(\d+);(\d+);(\d+)M$/.exec(sequence);
+      // A press of the left button, no modifier. Wheels and releases name nothing.
+      if (mouse && mouse[1] === "0") keys.push(`Mouse:${mouse[2] - 1}:${mouse[3] - 1}`);
+      else if (SEQUENCES.has(sequence)) keys.push(SEQUENCES.get(sequence));
       at += sequence.length;
       continue;
     }
@@ -802,48 +840,144 @@ function focusable(node, out = []) {
   return out;
 }
 
-const ENTER_SCREEN = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J";
-const LEAVE_SCREEN = "\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l";
+const ENTER_SCREEN = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[?1000h\x1b[?1006h\x1b[2J";
+const LEAVE_SCREEN = "\x1b[?1006l\x1b[?1000l\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l";
 
 // How long a lone Esc waits for the rest of a sequence the read cut in two.
 const ESCAPE_MS = 30;
 
+// The process's standard streams. In a worker, which is where `--time-limit`
+// runs the program, `process.stdin` is not the real one, so they are opened by
+// descriptor, as the host's own guest input does (host/input.ts).
+function openStreams() {
+  if (isMainThread) return { input: process.stdin, output: process.stdout, owned: false };
+  let input;
+  if (isatty(0)) input = new ReadStream(0);
+  else {
+    const stat = fstatSync(0);
+    input = stat.isFIFO() || stat.isSocket() ? new Socket({ fd: 0, readable: true, writable: false }) : createReadStream(null, { fd: 0, autoClose: false });
+  }
+  const output = isatty(1)
+    ? new WriteStream(1)
+    : {
+        isTTY: false,
+        on() {},
+        off() {},
+        write(text) {
+          let bytes = Buffer.from(text);
+          while (bytes.length) {
+            try {
+              bytes = bytes.subarray(writeSync(1, bytes));
+            } catch (error) {
+              if (error.code !== "EAGAIN") throw error;
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+            }
+          }
+        },
+      };
+  return { input, output, owned: true };
+}
+
+// While the alternate screen is up, what the program writes to stderr would
+// scribble on it and then vanish with it, a panic's message above all. So fd 2
+// becomes an unlinked file for that time: POSIX gives an open the lowest free
+// descriptor, which is how a Node program can do dup2. `drain` puts the terminal
+// back on fd 2 and returns what was written. Null if this cannot be done safely;
+// stderr then stays as it was. A worker needs none of it, and Node warns on the
+// screen if one closes a descriptor it did not open.
+export function captureStderr() {
+  if (!isMainThread || process.platform === "win32" || !isatty(2)) return null;
+  const path = join(tmpdir(), `hd-ui-tui-${process.pid}-${Date.now()}`);
+  try {
+    closeSync(openSync("/dev/tty", "w"));
+    closeSync(2);
+    const fd = openSync(path, "wx+", 0o600);
+    unlinkSync(path);
+    if (fd !== 2) {
+      closeSync(fd);
+      openSync("/dev/tty", "w");
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return {
+    drain() {
+      const bytes = Buffer.alloc(fstatSync(2).size);
+      if (bytes.length) readSync(2, bytes, 0, bytes.length, 0);
+      closeSync(2);
+      openSync("/dev/tty", "w");
+      return bytes.toString("utf8");
+    },
+  };
+}
+
 // The process's own terminal, or pipes. It starts on the first `apply`, and
 // the `exit` hook puts the terminal back however the program ends.
 export function processTerminal(env = process.env) {
-  const { stdin, stdout } = process;
-  const screen = Boolean(stdout.isTTY);
+  let streams = null;
+  const opened = () => (streams ??= openStreams());
   let open = false;
+  let stderr = null;
+  let sizeTimer = null;
   const close = () => {
     if (!open) return;
     open = false;
-    if (stdin.isTTY) stdin.setRawMode(false);
-    if (screen) stdout.write(LEAVE_SCREEN);
+    clearInterval(sizeTimer);
+    const { input, output } = opened();
+    if (input.isTTY) input.setRawMode(false);
+    if (output.isTTY) output.write(LEAVE_SCREEN);
+    const captured = stderr?.drain();
+    if (captured) output.write(captured);
   };
   return {
-    screen,
-    depth: screen ? stdout.getColorDepth() : 1,
+    get screen() {
+      return Boolean(opened().output.isTTY);
+    },
+    get depth() {
+      return this.screen ? opened().output.getColorDepth() : 1;
+    },
     // A pty that reports no size says 0 columns.
-    size: () => ({
-      cols: stdout.columns || Number(env.COLUMNS) || 80,
-      rows: stdout.rows || Number(env.LINES) || 24,
-    }),
-    write: (text) => stdout.write(text),
+    size() {
+      const { output } = opened();
+      const [cols, rows] = output.getWindowSize?.() ?? [0, 0];
+      return { cols: cols || Number(env.COLUMNS) || 80, rows: rows || Number(env.LINES) || 24 };
+    },
+    write: (text) => opened().output.write(text),
     start({ data, end, resize }) {
+      const { input, output, owned } = opened();
       open = true;
       process.on("exit", close);
-      if (stdin.isTTY) stdin.setRawMode(true);
-      stdin.setEncoding("utf8");
-      stdin.on("data", data);
-      stdin.on("end", end);
-      stdout.on("resize", resize);
-      if (screen) stdout.write(ENTER_SCREEN);
+      if (input.isTTY) input.setRawMode(true);
+      input.setEncoding("utf8");
+      input.on("data", data);
+      input.on("end", end);
+      if (output.isTTY) {
+        stderr = captureStderr();
+        output.write(ENTER_SCREEN);
+      }
+      if (owned && output.isTTY) {
+        // A worker hears no SIGWINCH, so it looks.
+        let last = this.size();
+        sizeTimer = setInterval(() => {
+          const next = this.size();
+          if (next.cols !== last.cols || next.rows !== last.rows) {
+            last = next;
+            resize();
+          }
+        }, 250);
+        sizeTimer.unref();
+      } else {
+        output.on("resize", resize);
+      }
     },
     stop() {
       close();
       process.off("exit", close);
-      stdin.pause();
-      stdin.unref?.();
+      const { input, owned } = opened();
+      input.pause();
+      if (owned) input.destroy();
+      else input.unref?.();
     },
   };
 }
@@ -866,6 +1000,7 @@ export function createTuiSurface(terminal) {
   let shown = [];
   let pendingBytes = "";
   let escapeTimer = null;
+  let page = null;
 
   const placeFocus = () => {
     const list = focusable(tree.root);
@@ -884,6 +1019,7 @@ export function createTuiSurface(terminal) {
     placeFocus();
     const { cols, rows } = terminal.size();
     const laid = layout(tree.root, cols, rows);
+    page = laid;
     // A page taller than the screen follows the focus.
     if (focus) {
       const at = boxOf(laid, focus);
@@ -942,9 +1078,52 @@ export function createTuiSurface(terminal) {
     focus = list[focusIndex];
   };
 
-  const edit = (node, next) => {
+  const edit = (node, parts, cursor) => {
+    const next = parts.join("");
     node.props.set("value", { tag: "Text", fields: { value: next } });
+    node.cursor = cursor;
     fire(node, "input", next);
+  };
+
+  // One key in a focused field. The cursor is a grapheme index.
+  const pressInField = (node, key) => {
+    const value = word(node, "value") ?? "";
+    const parts = graphemes(value);
+    const at = Math.min(node.cursor ?? parts.length, parts.length);
+    if (key === "Enter") fire(node, "enter", value);
+    else if (key === "ArrowLeft") node.cursor = Math.max(0, at - 1);
+    else if (key === "ArrowRight") node.cursor = Math.min(parts.length, at + 1);
+    else if (key === "Home") node.cursor = 0;
+    else if (key === "End") node.cursor = parts.length;
+    else if (key === "Backspace") {
+      if (at > 0) edit(node, parts.toSpliced(at - 1, 1), at - 1);
+    } else if (key === "Delete") {
+      if (at < parts.length) edit(node, parts.toSpliced(at, 1), at);
+    } else if (isText(key)) edit(node, parts.toSpliced(at, 0, key), at + 1);
+  };
+
+  // A click, or Space: a checkbox also toggles.
+  const activate = (node) => {
+    fire(node, "click", "");
+    if (node.kind === "checkbox") {
+      const next = !flag(node, "checked");
+      node.props.set("checked", { tag: "Flag", fields: { value: next } });
+      fire(node, "change", String(next));
+    }
+  };
+
+  // A press of the left button: the nearest focusable node under it takes the
+  // focus and is clicked; a field only takes the focus.
+  const pressMouse = (key) => {
+    const [, column, line] = key.split(":").map(Number);
+    if (!page) return;
+    const list = placeFocus();
+    const hit = boxAt(page, column, line + scroll);
+    let node = hit?.node;
+    while (node && !list.includes(node)) node = node.parent;
+    if (!node) return;
+    focus = node;
+    if (node.kind !== "input") activate(node);
   };
 
   // One key, against the tree as hd last left it.
@@ -958,6 +1137,11 @@ export function createTuiSurface(terminal) {
       render();
       return;
     }
+    if (key.startsWith("Mouse:")) {
+      pressMouse(key);
+      render();
+      return;
+    }
     placeFocus();
     const node = focus;
     const inField = node?.kind === "input";
@@ -967,20 +1151,9 @@ export function createTuiSurface(terminal) {
     }
     if (!node) return;
     fire(node, "key", key);
-    if (inField) {
-      const value = word(node, "value") ?? "";
-      if (key === "Enter") fire(node, "enter", value);
-      else if (key === "Backspace") {
-        if (value !== "") edit(node, graphemes(value).slice(0, -1).join(""));
-      } else if (isText(key)) edit(node, value + key);
-    } else if (key === "Enter" || key === " ") {
-      fire(node, "click", "");
-      if (node.kind === "checkbox" && key === " ") {
-        const next = !flag(node, "checked");
-        node.props.set("checked", { tag: "Flag", fields: { value: next } });
-        fire(node, "change", String(next));
-      }
-    }
+    if (inField) pressInField(node, key);
+    else if (key === " ") activate(node);
+    else if (key === "Enter") fire(node, "click", "");
     render();
   };
 
