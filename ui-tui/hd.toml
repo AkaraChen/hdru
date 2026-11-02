@@ -1,0 +1,11 @@
+[package]
+name = "ui-tui"
+
+[dependencies]
+ui = { path = "../ui", version = "0.1.0" }
+
+[host]
+"surface.Surface" = "providers/tui.mjs"
+
+[dev-capabilities]
+Clock = true
