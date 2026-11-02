@@ -671,13 +671,17 @@ provider:
 
 Known limits:
 
-- **The panic message is lost on a real screen.** The host writes `panic: ...`
-  straight to fd 2 and only then closes the instance, so the line lands on the
-  alternate screen and disappears with it; `hd`'s stack, printed after the
-  process ends, survives. A provider cannot intercept it (`output.ts` holds
-  `writeSync` from before the provider loads). `hd run counter-tui 2>err.log`
-  keeps it. The fix is upstream: close the instance before reporting, or give
-  a provider a hook that runs first. Not filed yet.
+- **The panic message is lost on a real screen.** A panic stub writes its
+  `panic: ...` report through `hd:rt`'s `panic` and `stderr` imports before it
+  traps, and the host closes the instance only after the run (`run.ts`, in a
+  `finally`). So the line lands on the alternate screen and disappears with it;
+  `hd`'s stack, printed after the process ends, survives. A provider cannot
+  intercept the write (`output.ts` holds `writeSync` from before the provider
+  loads). `hd run counter-tui 2>err.log` keeps it. This breaks no rule of the
+  host's: it is the alternate screen that discards the line, so it is a missing
+  feature and not an upstream bug. Reordering the close would not help, since
+  the guest writes the report itself. What would is the host telling a provider
+  before it writes `panic: `. Not filed.
 - **`--time-limit` is not interactive.** A supervised run puts the guest in a
   worker, whose stdio is not the TTY, so stdin reads as ended: one plain frame
   and exit 0. Opening `/dev/tty` from the worker might work; nothing needs it.
@@ -738,13 +742,14 @@ crate was started.
 3. **Value conversion: mirror `module.host.package.js-values`.** Enums with
    named payload fields become Rust enums with the same names, which is why
    `rendering.md` named those fields. Optionals, lists and handles map directly.
-4. **Who owns the thread.** The question the issue does not ask yet, and the one
-   GPUI raises. GPUI runs its platform event loop on the main thread, and the
-   guest's `next_event!` must not block it. A `.start` returning pending plus a
-   later wake fits a foreground executor, but only if the engine exposes "poll
-   this instance now" to the embedder instead of owning the loop, as `run` does
-   today. Without it the guest needs its own thread, and every `apply!` crosses
-   threads to reach GPUI's `App`.
+4. **How a native provider's completions reach the guest.** Who owns the loop
+   is already answered: `hd_run::Instance` is public, with `init`, `poll`, `wake`
+   and `completed`, `WasmtimeInstance` implements it, and the JS core has
+   `createDriver` (`cli.host.driver.*`, "Synchronous Host Driver"), so an embedder
+   can run turns from GPUI's foreground executor. What is missing is narrower:
+   `completed()` returns the engine's own reactor batch, and on a first look there
+   is no way to add to it from outside. A provider's pending `next_event.start`
+   needs one. This belongs with the binding shape in point 1. Not checked by a run.
 5. **A smaller first step:** a public `hd_run::Engine`-level way to run a module
    with extra imports, even unstable, would let `ui-gpui` start without settling
    generated traits, at the cost of a hand-written codec.
