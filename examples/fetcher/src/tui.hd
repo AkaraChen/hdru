@@ -1,0 +1,6 @@
+use dep.ui_tui.{Surface, run_app}
+use std.time.Clock
+use pkg.app
+
+pub fn main!() -> void $ Surface + Clock:
+    run_app!(app)

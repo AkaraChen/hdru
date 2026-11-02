@@ -1,0 +1,63 @@
+use dep.ui.{
+    Palette,
+    Style,
+    Theme,
+    Ui,
+    button,
+    column,
+    provide_theme,
+    rgba,
+    row,
+    signal,
+    style_live,
+    text_live,
+}
+
+## A button that reads on either palette: no fill, a translucent border,
+## and the text color of its container.
+fn quiet() -> Style:
+    Style::empty().padding_x(12.0).padding_y(4.0).radius(6.0).border(1.0, rgba(128, 128, 128, 128)).bg(rgba(0, 0, 0, 0)).cursor(.Pointer)
+
+fn counter() -> void $ Ui + Theme:
+    theme := $.use(Theme).palette()
+    count := signal(+0)
+    column(style=Style::empty().gap(12.0).padding(16.0).radius(8.0).border_width(1.0)):
+        style_live:
+            p := theme.get()
+            Style::empty().bg(p.surface).color(p.on_surface).border_color(p.line)
+        text_live:
+            "Count: ${count.get()}"
+        row(style=Style::empty().gap(4.0)):
+            button(
+                "-",
+                fn():
+                    count.update(fn(n): n - 1)
+                ,
+                style=quiet(),
+            )
+            button(
+                "+",
+                fn():
+                    count.update(fn(n): n + 1)
+                ,
+                style=quiet(),
+            )
+
+## The app, for either renderer: its entries are `main.hd` and `tui.hd`.
+pub fn app() -> void $ Ui:
+    palette := signal(Palette::light())
+    dark := signal(false)
+    provide_theme(palette):
+        column(style=Style::empty().gap(12.0).padding(16.0).radius(12.0)):
+            style_live:
+                p := palette.get()
+                Style::empty().bg(p.background).color(p.on_surface)
+            counter()
+            button(
+                "toggle dark mode",
+                fn():
+                    dark.update(fn(on): !on)
+                    palette.set(if dark.peek(): Palette::dark() else: Palette::light())
+                ,
+                style=quiet(),
+            )

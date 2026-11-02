@@ -4,6 +4,16 @@ name = "todos"
 [dependencies]
 ui = { path = "../../ui", version = "0.1.0" }
 ui-dom = { path = "../../ui-dom", version = "0.1.0" }
+ui-tui = { path = "../../ui-tui", version = "0.1.0" }
 
 [capabilities]
 "dep.ui_dom.surface.Surface" = true
+"dep.ui_tui.surface.Surface" = true
+
+[[executable]]
+name = "todos"
+module = "main"
+
+[[executable]]
+name = "todos-tui"
+module = "tui"
