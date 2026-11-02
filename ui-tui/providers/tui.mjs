@@ -1072,8 +1072,6 @@ export function createTuiSurface(terminal) {
   const tree = createTree();
   const events = [];
   const keys = [];
-  const jobs = [];
-  const jobWaiters = [];
   let waiting = null;
   let started = false;
   let stopped = false;
@@ -1306,16 +1304,6 @@ export function createTuiSurface(terminal) {
       placeFocus();
       const { cols, rows } = terminal.size();
       return paint(layout(tree.root, cols, rows), cols, rows, focus, scroll);
-    },
-    post_job(job) {
-      if (jobWaiters.length) jobWaiters.shift()(job);
-      else jobs.push(job);
-    },
-    next_job() {
-      if (jobs.length) return jobs.shift();
-      return new Promise((resolve) => {
-        jobWaiters.push(resolve);
-      });
     },
     apply(commands, context) {
       start(context);

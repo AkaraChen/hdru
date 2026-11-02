@@ -595,15 +595,6 @@ test("a sequence cut in two reads as one key, and Esc alone is dropped", async (
   assert.deepEqual(surface.next_event(), { handler: 1, payload: "" }, "the Esc did not swallow the Tab");
 });
 
-test("the jobs queue answers workers in order, and holds a job no one waits for", async () => {
-  const { surface } = surfaceOf([]);
-  surface.post_job(5);
-  assert.equal(surface.next_job(), 5);
-  const waiter = surface.next_job();
-  surface.post_job(0);
-  assert.equal(await waiter, 0);
-});
-
 test("a field edits at its cursor, which hd replacing the text puts back at the end", async () => {
   const { surface, terminal } = surfaceOf(form);
   const typed = async (bytes) => (await eventsAfter(surface, terminal, bytes)).map((event) => event.payload);

@@ -2,6 +2,7 @@ use dep.ui.{
     Style,
     Command,
     Mutate,
+    Track,
     Resource,
     Ui,
     UiEvent,
@@ -13,6 +14,7 @@ use dep.ui.{
     resource,
     row,
     signal,
+    sync,
     text_live,
 }
 use pkg.{Recorder, Surface, run_app, scripted}
@@ -80,7 +82,6 @@ it("a loader that suspends lands through the workers of run_app"):
     recorder := scripted([])
     $.with(Clock=clock, Surface=recorder):
         run_app!(slow_profile)
-    assert_equal(recorder.jobs, [], reason="the posted job and every stop marker were taken")
     log := recorder.log
     assert_equal(log.get(2).copied(), .Some(Command.SetText(1, "loading")), reason="mount")
     assert_equal(
@@ -115,7 +116,6 @@ it("run_app carries payloads from the surface to the handler"):
                 UiEvent { handler: 1, payload: "hi" },
                 UiEvent { handler: 2, payload: "hi" },
             ],
-            jobs: [],
         },
     )
     $.with(Surface=recorder):
@@ -125,3 +125,65 @@ it("run_app carries payloads from the surface to the handler"):
     assert_equal(log.get(20).copied(), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
     assert_equal(log.get(21).copied(), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
     assert_equal(log.get(22).copied(), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
+
+fn chain() -> void $ Ui + Clock:
+    let clock: *mut dyn Clock = $.use(Clock)
+    next := signal(+0)
+    rows := resource(
+        fn(): next.get(),
+        fn!(key: i32) -> Result[i32, string]:
+            clock.sleep!(ms(1))
+            .Ok(key)
+        ,
+    )
+    # A load that lands leads to the next one, from inside a worker's send.
+    sync(fn() -> void $ Track + Mutate:
+        match rows.get():
+            .Ready(key) =>
+                if key < 40:
+                    next.set(key + 1)
+            _ => pass
+    )
+    text_live:
+        match rows.get():
+            .Ready(key) => "at $key"
+            _ => "loading"
+
+it("loads that lead to loads all land, after the loop has stopped, with no deadlock"):
+    reset_for_test()
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Surface=recorder):
+        run_app!(chain)
+    assert_equal(recorder.log.last().copied(), .Some(Command.SetText(1, "at 40")), reason="the chain ran to its end")
+
+fn crowd() -> void $ Ui + Clock:
+    let clock: *mut dyn Clock = $.use(Clock)
+    column:
+        for index in 0..20:
+            load := resource(
+                fn(): index,
+                fn!(key: usize) -> Result[usize, string]:
+                    clock.sleep!(ms(1))
+                    .Ok(key)
+                ,
+            )
+            text_live:
+                match load.get():
+                    .Ready(key) => "done $key"
+                    _ => "loading"
+
+it("more loads than workers all land"):
+    reset_for_test()
+    clock := ManualClock::new(Timestamp::from_unix_milliseconds(0))
+    recorder := scripted([])
+    $.with(Clock=clock, Surface=recorder):
+        run_app!(crowd)
+    let mut done = 0
+    for command in recorder.log:
+        match command:
+            .SetText(_, text) =>
+                if text.starts_with("done"):
+                    done += 1
+            _ => pass
+    assert_equal(done, 20, reason="every load landed")

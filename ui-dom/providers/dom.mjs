@@ -13,10 +13,9 @@
 // "dom:" prefix are this renderer's own: "dom:class" and "dom:attr:NAME".
 //
 // Commands arrive as { tag, fields }; an optional field is a value or
-// null; node, handler and job ids are Numbers; a PropValue is
+// null; node and handler ids are Numbers; a PropValue is
 // { tag: "Number" | "Text" | "Flag" | "Paint" | "Extent" | "Unset",
-// fields }. `next_job` returns a Promise that a later `post_job` resolves,
-// which is what lets the runtime's worker tasks wait for resource loads.
+// fields }. `next_event` may return a Promise, which lets the program wait.
 //
 // The factories and `cssFor` are exported for providers/dom.test.mjs.
 
@@ -248,20 +247,8 @@ export function createDomSurface(root, nodes = new Map(), log = (line) => consol
         throw new Error(`ui: unknown command ${command.tag}`);
     }
   };
-  const jobs = [];
-  const jobWaiters = [];
   let batch = 0;
   return {
-    post_job(job) {
-      if (jobWaiters.length) jobWaiters.shift()(job);
-      else jobs.push(job);
-    },
-    next_job() {
-      if (jobs.length) return jobs.shift();
-      return new Promise((resolve) => {
-        jobWaiters.push(resolve);
-      });
-    },
     apply(commands) {
       batch += 1;
       console.log(`ui: batch ${batch}: ${commands.length} command(s)`);
@@ -372,21 +359,8 @@ export function createScriptedSurface(clicks, print, nodes = new Map()) {
     for (const child of n.children) lines.push(...render(child, depth + 1));
     return lines;
   };
-  const jobs = [];
-  const jobWaiters = [];
   let batch = 0;
   return {
-    post_job(job) {
-      if (job !== 0) print(`-- job ${job} posted`);
-      if (jobWaiters.length) jobWaiters.shift()(job);
-      else jobs.push(job);
-    },
-    next_job() {
-      if (jobs.length) return jobs.shift();
-      return new Promise((resolve) => {
-        jobWaiters.push(resolve);
-      });
-    },
     apply(commands) {
       batch += 1;
       print(`-- batch ${batch}: ${commands.length} command(s)`);

@@ -193,13 +193,16 @@ listens on `last_node()`.
 A `resource` loads a value with a suspending function whenever its tracked key
 changes. It is a `ReadSignal[Resource[T, E]]` of `Loading`, `Ready` or `Failed`.
 
-**Loads go through a host-mediated queue, because nothing else can wait.** The loop
-must serve events while loaders run, but `race!` cancels its losers
-(`req.combinator.race-losers-disposed.using-split`), `join!` takes a fixed set, and user code can
-neither build a `PollContext` nor implement `Suspend` (`req.protocol.builtin`,
-`req.poll-context.user`). So no user-written combinator can poll a changing set of
-loaders, and the only thing that can suspend is a host wait. `Surface` therefore
-has `post_job(id)` and `next_job!() -> id`.
+**Loads run on a pool of workers.** The loop must serve events while loaders run, and
+there is no way to start a task later, so `run_app!` starts a fixed set of workers beside the
+event loop, with `join!` and `map_join!`.
+
+**Jobs wait in a plain list, and a channel only wakes workers.** `std.task`'s usual pool sends
+items down a shared channel (`std-task.channel.pool`), but here that capacity would be a trap: a
+worker hands over the jobs its own load made, so with the channel full every worker could wait on
+`send!` at once, and the program would die of `suspension-deadlock`. So a token is sent only for a
+worker counted idle, the tokens never outnumber the capacity, and `send!` never waits. Hosts stay out
+of it, so `Surface` has only `apply!` and `next_event!`.
 
 **A loader has the empty row.** Its providers are bound when the cold suspension is
 made, inside the resource's tracking computation, which cannot carry a row
@@ -230,15 +233,14 @@ It mounts, sends the first batch, then runs `join!(event_loop(), workers())`.
 - `event_loop!` takes `next_event!`, dispatches, and sends, until an event names
   handler 0. Then it posts job 0. It calls `$.use(Surface)` fresh each time, so no
   reference into the provider is live while a handler runs.
-- `worker!` takes `next_job!`, runs the job with `run_job!`, and sends what it emitted.
-  A worker that takes the stop marker re-posts it while others are live, so one 0 stops
-  them all, and a worker mid-load takes it afterwards, so a load in flight at shutdown
-  still lands.
-- There are four workers. The count is the number of arguments to `join!`.
+- `worker!` takes a job from the pool, runs it with `run_job!`, and sends what it emitted. With no
+  job it waits on the channel, and once the loop has ended and no job is left it stops. So a load in
+  flight at shutdown still lands, as do any loads it leads to.
+- There are four workers, so at most four loads are in flight at once.
 
-`Recorder` implements `Surface` in hd for tests: `apply!` logs, `next_event!` pops a
-scripted event or answers handler 0, and `next_job!` answers 0 when empty. Core tests in
-`ui` need no host at all: they use `mount`, `dispatch`, `take_commands` and `run_job!`.
+`Recorder` implements `Surface` in hd for tests: `apply!` logs, and `next_event!` pops a scripted event
+or answers handler 0. Core tests in `ui` need no host at all: they use `mount`, `dispatch`,
+`take_commands` and `run_job!`.
 
 ## Known limits
 
@@ -247,8 +249,9 @@ scripted event or answers handler 0, and `next_job!` answers 0 when empty. Core 
   since every flush already happens outside provider methods, but it touches every file.
 - **The boundary is a pull loop.** hd has no export registration
   (`HOST_EMBEDDING.md`), so the host cannot call `dispatch` directly.
-- **No in-flight cancellation, and a fixed pool of four,** both for lack of an
-  in-language wait.
+- **No in-flight cancellation.** As above. Each load would need a task of its own to cancel, and
+  there is no way to start one later.
+- **A fixed pool of four,** for the same reason. The number is one constant.
 - **Signals are never freed**, as above.
 - **`hd` runs on Node here.** This build has no wasmtime engine, so nothing has run on
   it, including `reactive` and `ui`, which have no host trait to stop them.
