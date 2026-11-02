@@ -7,7 +7,7 @@
 // "2,2,1" clicks, "4=milk,5" types "milk" into the field of handler 4.
 //
 // This is the DOM's half of rendering.md: the node kinds and the property
-// keys of its section 3 mapped onto elements and CSS, the way
+// keys of its tables mapped onto elements and CSS, the way
 // react-native-web maps React Native's View and style. Unknown kinds render
 // as "box", unknown keys are dropped (each logged once), and keys with a
 // "dom:" prefix are this renderer's own: "dom:class" and "dom:attr:NAME".

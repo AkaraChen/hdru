@@ -1,6 +1,6 @@
 // Checks providers/dom.mjs: both trees forget the nodes a `Remove` or
 // `Clear` takes away, and the DOM tree implements the kind and key tables
-// of rendering.md section 3. Run with
+// of rendering.md. Run with
 // `node --test ui-dom/providers/dom.test.mjs`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -134,7 +134,7 @@ const paint = (r, g, b, a = 255) => ({ tag: "Paint", fields: { color: { r, g, b,
 const extent = (tag, value) => ({ tag: "Extent", fields: { size: { tag, fields: value === undefined ? {} : { value } } } });
 const unset = { tag: "Unset", fields: {} };
 
-// rendering.md section 3, the DOM column: key, value, the CSS it names.
+// rendering.md, the DOM column: key, value, the CSS it names.
 const table = [
   ["direction", word("row"), [["flexDirection", "row"]]],
   ["wrap", flag(true), [["flexWrap", "wrap"]]],

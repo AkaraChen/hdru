@@ -1,61 +1,36 @@
-# Rendering layers and style
+# Rendering
 
-Status: design, 2026-11-02; implemented the same day as roadmap phase 12
-(commit `a3f6f05`), with the deviations in section 9 and their reasons in
-`design.md`. Decides where the renderer boundary sits, what crosses it,
-and how style is expressed so that one hd component tree can render to
-the DOM today and to non-CSS renderers (GPUI-like, custom retained
-trees) later. Probed against `../hd-lang` at `cf5040b4a`; the probe is in
-section 8.
+Where the renderer boundary sits, what crosses it, how style is expressed, and the two
+renderers that exist: the DOM (`ui-dom`) and the terminal (`ui-tui`).
 
-## 1. Three layers, as React and Solid draw them
+## Three layers
 
-React is portable because of its renderer interface, not its virtual DOM.
-The reconciler diffs `{type, props}` trees and emits mutations; a *host
-config* of about thirty functions (`createInstance`, `appendChild`,
-`commitUpdate`, ...) applies them; and the *host component vocabulary*
-(`div` and `className` for the DOM, `View` and `style` for React Native)
-is not shared at all. React itself has no opinion on style: `style` is a
-prop handed to the renderer. React Native defined a typed flexbox subset
-over Yoga, and react-native-web maps that subset back onto CSS. Solid has
-no virtual DOM and still renders anywhere through
-`solid-js/universal`'s `createRenderer({ createElement, insertNode,
-setProperty, ... })`, which shows that the interface, not the diffing
-strategy, is what carries portability.
+React is portable because of its renderer interface, not its virtual DOM, and Solid
+shows the same with `createRenderer` and no virtual DOM at all. Host vocabulary is not
+shared: `div` and `className` for the DOM, `View` and `style` for React Native. This
+library has the same shape:
 
-| Layer | React | Solid | This package | hd package (`packages.md`) |
+| Layer | React | Solid | Here | Package |
 | --- | --- | --- | --- | --- |
-| 1 Reactive core | reconciler, Fiber | signals, owners | `graph.hd`, `reactive.hd`, `owner.hd`: done | `reactive` |
-| 2 Renderer protocol | host config | `createRenderer` table | the `Surface` command stream: done, but carries DOM words | types in `ui`; the `@host` trait and loop in each renderer package (`ui-dom`, `ui-tui`) |
-| 3 Vocabulary | `div`/`className` vs `View`/`style` | `solid-js/web` | not defined; this document | `ui` |
+| 1 Reactive core | reconciler, Fiber | signals, owners | `graph.hd`, `reactive.hd`, `owner.hd` | `reactive` |
+| 2 Renderer protocol | host config | `createRenderer` table | the `Command` stream | types in `ui`; the `@host` trait and loop in each renderer (`ui-dom`, `ui-tui`) |
+| 3 Vocabulary | `div` vs `View` | `solid-js/web` | node kinds, events and property keys, typed by `Style` | `ui` |
 
-Rule that follows: **layer 2 carries no vocabulary.** Node kinds, event
-names and property keys are data. Layer 3 is a typed hd module that
-lowers to layer 2, the way React Native's `View` and `ViewStyle` lower to
-host config calls. A renderer implements the layer 2 protocol once and
-the layer 3 key table as far as it can; unknown keys are ignored.
+**Layer 2 carries no vocabulary.** Kinds, event names and property keys are data, so
+adding a property touches `Style` and the renderers that want it, never the host trait.
 
-## 2. Layer 2: the protocol
-
-`DomCommand` becomes `Command`. Eight operations on opaque node ids:
+## Layer 2: the protocol
 
 ```hd
 @derive(Eq, Debug)
 pub enum Command:
-    ## Makes a node of `kind`: "box", "text", "button", "input",
-    ## "checkbox" or "fragment" (section 3); a renderer treats an unknown
-    ## kind as "box".
     Create(node: NodeId, kind: string)
     Append(parent: NodeId, child: NodeId)
     MoveBefore(parent: NodeId, child: NodeId, before: NodeId?)
     Remove(node: NodeId)
     Clear(node: NodeId)
-    ## The text of a "text" or "button" node.
     SetText(node: NodeId, text: string)
-    ## Sets or unsets one property. Keys are vocabulary; unknown keys are
-    ## ignored. `Unset` removes the property.
     SetProp(node: NodeId, key: string, value: PropValue)
-    ## Reports `event` on `node` as `UiEvent { handler, payload }`.
     Listen(node: NodeId, event: string, handler: HandlerId)
 
 @derive(Eq, Debug)
@@ -67,185 +42,125 @@ pub enum PropValue:
     Extent(size: Size)
     Unset
 
-@derive(Eq, Debug)
-pub struct Color:
-    pub r: u8
-    pub g: u8
-    pub b: u8
-    pub a: u8
-
-@derive(Eq, Debug)
-pub enum Size:
-    Px(value: f32)
-    Pct(value: f32)
-    Auto
-    Fill
+pub struct Color:  # r, g, b, a: u8; built by rgb and rgba
+pub enum Size:     # Px(value: f32), Pct(value: f32), Auto, Fill
 ```
 
-Enum payload fields are named because they cross the ABI by name: the
-generated glue delivers `{ tag: "Px", fields: { value: 8 } }`, and a
-renderer in any language reads `fields.value`. `rgb(r, g, b)` and
-`rgba(r, g, b, a)` build a `Color`.
+A host answers with `UiEvent { handler, payload }`. Handler 0 ends the loop.
 
-Why `PropValue` is typed at all, when React's `props` are untyped: the
-protocol crosses an ABI, and a renderer written in Rust or Go must not
-parse `"8px"` or `"#336699"`. `Color` and `Size` are the only structured
-values every renderer needs; everything else in the vocabulary is a
-number, a word or a flag. Adding a property never changes this enum, so
-the host trait and every provider stay fixed while the vocabulary grows.
+- **Fields are named because they cross the ABI by name.** The generated glue delivers
+  `{ tag: "Px", fields: { value: 8 } }`, and an optional is a value or `null`.
+- **`PropValue` is typed** so that a renderer in any language never parses `"8px"` or
+  `"#336699"`. `Color` and `Size` are the only structured values every renderer needs.
+- **Key namespaces.** A key without a prefix is portable. A key with a renderer prefix
+  belongs to that renderer and is ignored by the others: `dom:class`,
+  `dom:attr:aria-label`. This replaces a raw command and makes non-portable code visible
+  at the call site.
+- **Numbers are `f32` logical pixels**, and each renderer applies its own scale.
 
-Key namespaces: a key without a prefix is portable vocabulary. A key with
-a renderer prefix is that renderer's and is ignored by the others:
-`dom:class`, `dom:attr:aria-label`, later `gpui:...`. This replaces a
-`Raw` command and makes non-portable code visible at the call site.
+## Layer 3: the vocabulary
 
-`SetAttr` is gone: `class` is `SetProp(n, "dom:class", .Text(...))`, and
-`style` strings are gone with it. `UiEvent` is unchanged.
-
-## 3. Layer 3: the portable vocabulary, version 1
-
-The subset every target can implement: flexbox boxes, text, two
-controls. It is React Native's model, which react-native-web has shown
-maps onto CSS without loss.
+The subset every target can implement: flexbox boxes, text, two controls. It is React
+Native's model, which react-native-web has shown maps onto CSS without loss. Not included:
+grid, absolute positioning, transforms, animation, shadows, pseudo-states.
 
 ### Node kinds
 
-| kind | DOM | Rule |
-| --- | --- | --- |
-| `box` | `div` with `display:flex; flex-direction:column` | every box is a flex container, column by default, as React Native's `View`; the hd builder is `view`, since `box` is hd's allocation builtin |
-| `text` | `span` | holds text only; styled by the text properties |
-| `button` | `button` | a box that emits `click` and takes `SetText`; kept distinct so the DOM gets its accessibility semantics |
-| `input` | `input type=text` | emits `input` with the value as payload; `value` property |
-| `checkbox` | `input type=checkbox` | emits `change` with `"true"` / `"false"`; `checked` property |
-| `fragment` | `div` with `display:contents` | a grouping node that takes no layout of its own; `show` and `for_each` render into one so a branch or a row keeps its place |
+| kind | DOM | Terminal | Rule |
+| --- | --- | --- | --- |
+| `box` | `div`, `display: flex`, column | a flex column | every box is a flex container, column by default; the builder is `view` |
+| `text` | `span` | wrapped text | holds text only |
+| `button` | `button` | centered label, `[label]` with no border or background | emits `click`, takes `SetText` |
+| `input` | `input type=text` | a field with a cursor | `value` property |
+| `checkbox` | `input type=checkbox` | `[x]` / `[ ]` | `checked` property |
+| `fragment` | `div`, `display: contents` | no box at all | groups without layout; `show` and `for_each` render into one |
+
+`button` and `input` stay kinds, not boxes with a `role` key: both renderers draw them
+differently from a box, and a key would carry the same switch with less checking. An
+unknown kind renders as `box`.
 
 ### Events
 
-| event | payload | DOM | terminal |
+| event | payload | DOM | Terminal |
 | --- | --- | --- | --- |
 | `click` | empty | `click` | Enter or Space on the focus, or a left press |
-| `input` | the field's text | `input` | typing in a focused field |
-| `change` | `"true"` / `"false"` | `change` | Space on a focused checkbox |
+| `input` | the field's text | `input` | editing a focused field |
+| `change` | `"true"` / `"false"` | `change` | Space or a press on a checkbox |
 | `key` | the key name, as `KeyboardEvent.key` | `keydown` | any key on the focus but Tab, Shift-Tab and the quit keys |
 | `enter` | the field's text | `keydown` of Enter | Enter in a focused field |
 
-`enter` came from the todos example in phase 13 and joined this table in phase
-16, when a second renderer needed it. Events bubble on both renderers.
+Events bubble to ancestors' listeners on both renderers.
 
 ### Properties
 
-| key | value | DOM | taffy / GPUI-like |
+Edges stay four keys rather than one value: a provider reads each by name, and four
+`SetProp`s cost nothing a batch notices. An unknown key is dropped.
+
+| key | value | DOM | Terminal |
 | --- | --- | --- | --- |
-| `direction` | Text `row` / `column` | `flex-direction` | `flex_direction` |
-| `wrap` | Flag | `flex-wrap` | `flex_wrap` |
-| `justify` | Text `start` / `center` / `end` / `between` / `around` | `justify-content` | `justify_content` |
-| `align` | Text `start` / `center` / `end` / `stretch` | `align-items` | `align_items` |
-| `gap` | Number | `gap` (px) | `gap` |
-| `grow`, `shrink` | Number | `flex-grow`, `flex-shrink` | `flex_grow`, `flex_shrink` |
-| `width`, `height`, `min_width`, `min_height`, `max_width`, `max_height` | Extent | the same; `Fill` is `flex: 1 1 0` | `size`, `min_size`, `max_size`; `Fill` is grow 1, basis 0 |
-| `padding_top` ... `padding_left`, `margin_*` | Number | the same (px) | `padding`, `margin` rects |
-| `border_width` | Number | `border-width` | `border` |
-| `border_color` | Paint | `border-color` | border color |
-| `radius` | Number | `border-radius` | corner radii |
-| `background` | Paint | `background-color` | fill |
-| `opacity` | Number 0..1 | `opacity` | opacity |
-| `overflow` | Text `visible` / `hidden` / `scroll` | `overflow` | `overflow` |
-| `cursor` | Text `default` / `pointer` / `text` | `cursor` | cursor style |
-| `color` | Paint | `color` | text color |
-| `font_size` | Number | `font-size` (px) | font size |
-| `font_weight` | Number 100..900 | `font-weight` | weight |
-| `font_family` | Text, a token name | resolved by the renderer's theme table | the same |
-| `value` | Text | `input.value` | control value |
-| `checked` | Flag | `input.checked` | checkbox state |
-| `disabled` | Flag | `disabled` | interaction off |
+| `direction` | Text `row` / `column` | `flex-direction` | followed |
+| `wrap` | Flag | `flex-wrap` | not followed: one line only |
+| `justify` | Text `start` / `center` / `end` / `between` / `around` | `justify-content` | followed |
+| `align` | Text `start` / `center` / `end` / `stretch` | `align-items` | followed |
+| `gap` | Number | `gap` | in cells |
+| `grow`, `shrink` | Number | `flex-grow`, `flex-shrink` | followed, in whole cells |
+| `width`, `height`, `min_*`, `max_*` | Extent | the same; `Fill` is `flex: 1 1 0; align-self: stretch` | in cells; see `Fill` below |
+| `padding_*`, `margin_*` | Number | the same | in cells |
+| `border_width` | Number | `border-width` | any nonzero is one cell |
+| `border_color` | Paint | `border-color` | the border's color |
+| `radius` | Number | `border-radius` | above 0, rounded corners |
+| `background` | Paint | `background-color` | blended over what is underneath |
+| `opacity` | Number 0..1 | `opacity` | under 1, the dim attribute |
+| `overflow` | Text `visible` / `hidden` / `scroll` | `overflow` | `hidden` and `scroll` both clip |
+| `cursor` | Text `default` / `pointer` / `text` | `cursor` | not followed |
+| `color` | Paint | `color` | inherited; see below |
+| `font_size` | Number | `font-size` | not followed |
+| `font_weight` | Number 100..900 | `font-weight` | 600 and up is bold; inherited |
+| `font_family` | Text, a token name | resolved by a theme table | not followed |
+| `value` | Text | `input.value` | the field's text |
+| `checked` | Flag | `input.checked` | the checkbox's state |
+| `disabled` | Flag | `disabled` | dim, takes no focus |
 
-Not in version 1: grid, absolute positioning, transforms, animation,
-shadows, pseudo-states. Overlays will come as a `layer` node kind, not by
-opening `position`.
+**`color` and `font_weight` inherit on both renderers.** `text_live` takes no style, so
+live text is styled by a wrapping `view` and depends on it.
 
-Text properties are valid on `text` nodes only. The DOM inherits `color`
-and font from a parent box; GPUI inherits text color too; taffy and
-custom renderers do not. The vocabulary therefore promises no
-inheritance, and the hd `Theme` (section 5) makes setting them on each
-text node cheap. A renderer that does inherit must set them explicitly
-anyway, so behavior matches.
+**`Fill` differs by renderer.** The terminal grows on the main-axis key and stretches on
+the cross-axis key. The DOM applies its one CSS shorthand to either key, so `width: Fill`
+in a column also grows there. Code that wants both renderers to agree sets `Fill` on the
+main-axis key.
 
-## 4. The hd side: `Style` and the builders
+## The hd side: `Style`
 
-`Style` is a struct of optional fields, one per key above (edges as four
-fields each). `None` means "not set", so one value serves both "the whole
-style of this node" and "only these changes":
+`Style` has one optional field per key, with edges as four fields. `None` means "not set",
+so one value serves both a whole style and a set of changes. It is generated from one field
+table, so field order, lowering order and diff order are the same.
 
 ```hd
-@derive(Eq, Debug)
-pub struct Style:
-    pub direction: Direction?
-    pub gap: f32?
-    pub padding: Edges?
-    pub width: Size?
-    pub background: Color?
-    pub color: Color?
-    # ...
-
-impl Style:
-    pub fn empty() -> Style: ...
-    pub fn gap(self, px: f32) -> Style:
-        Style { ...self, gap: .Some(px) }
-    pub fn padding(self, all: f32) -> Style: ...
-    pub fn bg(self, color: Color) -> Style: ...
-    # one method per field, GPUI-style chaining
+column(style=Style::empty().gap(8.0).padding(12.0).bg(theme.surface)):
+    style_live:
+        Style::empty().opacity(if dim.get(): 0.5 else: 1.0)
+    text("hello", style=Style::empty().color(theme.on_surface))
 ```
 
-Usage: `column(style=Style::empty().gap(8.0).padding(12.0).bg(theme.surface)):`.
-The constructor is a static method because a parameter named `style`
-hides a function named `style` in its own default (probed:
-`binding-not-yet-visible`). Shorthands set several fields at once:
-`padding(px)`, `padding_x`, `padding_y`, `margin(px)`,
-`border(px, color)`; `merge(other)` overlays one style on another;
-`lower(style)` and `diff(last, next)` are the two lowering functions and
-are exported for renderers and tests.
+- `Style::empty()` is a static method because a parameter named `style` hides a function
+  named `style` in its own default.
+- Chain methods exist per field, with shorthands `padding`, `padding_x`, `padding_y`,
+  `margin` and `border(px, color)`, and `merge(other)` overlays one style on another. The
+  background setter is `bg`.
+- `lower(style)` gives one `SetProp` per set field, and `diff(last, next)` gives changed keys,
+  with `Unset` for a key that went to `None`.
+- `style_live:` restyles the enclosing container and emits only changed keys, nothing for an
+  equal style. Its first run compares with an empty style, so give a key a static or a live
+  value, not both, or `Unset` can remove the static one.
+- `column` and `row` are `view` with `direction` set, always emitted.
+- `Style.dom_class` and `attr` / `attr_live` reach the `dom:` keys.
 
-Builders:
+## Theme instead of a cascade
 
-- `view(style: Style = Style::empty(), children)` makes a `"box"` node.
-  It is not named `box` because `box(...)` is hd's allocation builtin and
-  a public builder of that name would shadow it in every importing
-  module. `column` and `row` are `view` with `direction` preset and
-  replace the former `gap` parameter, so there is one way to write a gap.
-- `text(content, style=)`, `button(label, on_click, style=)`,
-  `input(value, style=)`, `checkbox(checked, style=)`.
-- **Lowering at create**: for each `Some` field, one `SetProp` after
-  `Create`. `Edges` lowers to its four keys. `Direction.Row` lowers to
-  `Text("row")`.
-- **`style_live:`** inside a container's children block restyles the
-  enclosing container, `$.use(Parent).parent()`. The block
-  returns a `Style` under `Track`; the computation keeps the last `Style`
-  and emits `SetProp` only for fields that changed, `Unset` for a field
-  that went to `None` (the `diff` of the probe). Equal styles emit
-  nothing, as `text_live` does for text. A live style on a leaf wraps the
-  leaf in a `box`; a `text_live`-style variant for leaves can follow if
-  examples want it.
-- `dom:class` is reachable through `Style.dom_class` so the non-portable
-  key is spelled out where it is used. `attr(name, value)` and
-  `attr_live(name, compute)` set `dom:attr:NAME` on the last node built,
-  for the few DOM attributes (`title`, `aria-*`) the vocabulary does not
-  cover.
-
-## 5. Theme replaces the cascade
-
-CSS's cascade exists to carry values from an ancestor to deep nodes. hd
-already has that: a requirement key. After roadmap phase 10 makes the
-builders row-polymorphic:
+CSS's cascade carries values from an ancestor to deep nodes, and hd already has that: a
+requirement key.
 
 ```hd
-pub trait Theme:
-    fn palette(self) -> ReadSignal[Palette]
-
-# provide_theme[$R](palette: Signal[Palette], body: fn() -> void $ R + Theme) -> void $ R
-# installs a SignalTheme; Palette::light() and Palette::dark() are the two
-# built-in palettes, with background, surface, on_surface, muted, line,
-# accent and on_accent.
-
 fn card() -> void $ Ui + Theme:
     theme := $.use(Theme).palette()
     column(style=Style::empty().bg(theme.peek().surface).padding(12.0)):
@@ -254,174 +169,123 @@ fn card() -> void $ Ui + Theme:
         text("hello", style=Style::empty().color(theme.peek().on_surface))
 ```
 
-A component that needs a theme says so in its row; forgetting to provide
-one is `missing-requirement` at compile time. `peek` gives a static
-style, `get` inside `style_live` follows the palette signal, so dark mode
-is one signal write. What the browser loses is `prefers-color-scheme` as
-a CSS feature; the host sends it as an event instead.
+`provide_theme(palette_signal, body)` installs it, and `Palette::light()` and `dark()` have the
+roles `background`, `surface`, `on_surface`, `muted`, `line`, `accent` and `on_accent`. Forgetting
+to provide one is `missing-requirement` at compile time. `peek` gives a static style and `get`
+inside `style_live` follows the signal, so dark mode is one write.
 
-## 6. What a renderer implements
+## What a renderer implements
 
-A provider keeps a node table, implements the eight commands, and the
-kind and key tables as far as it can. The DOM provider is the
-react-native-web of this design: `direction: row` becomes
-`flex-direction: row`. A frame-based renderer keeps the retained tree the
-commands describe and draws it each frame; the command stream carries
-changes, drawing is the renderer's cadence. Unknown kinds render as
-`box`; unknown keys are dropped; a renderer may log both once.
+A package with its own `@host trait Surface` (one trait maps to one provider file), its own
+`run_app!` and `Recorder`, and a provider that keeps a node table, implements the eight commands,
+and follows the kind and key tables as far as it can. A provider is a plain object with `apply`,
+`next_event`, `post_job` and `next_job`. Suspending methods may return a value or a Promise, and
+each method also receives a context whose `instanceSignal` aborts when the program ends.
 
-## 7. Decisions recorded
+## The DOM provider
 
-- Protocol generic, vocabulary typed in hd, not the reverse: adding a
-  property touches `Style` and the renderers that want it, never the host
-  trait.
-- Flexbox subset only, box is flex column by default, no inheritance
-  promised.
-- Static `style=` plus `style_live:` on the container; no per-property
-  live setters. `attr_live` stays for `dom:attr:*` only.
-- `Theme` as a requirement key with a `ReadSignal[Palette]`, not a
-  stylesheet.
-- No `Raw`; renderer-prefixed keys instead.
-- `f32` logical pixels; a renderer applies its own scale factor.
+`ui-dom/providers/dom.mjs` is the react-native-web of this design. In a browser it drives real
+elements under `#app`; anywhere else it keeps an in-memory tree, prints each batch, and answers
+the events in `UI_CLICKS` (`2,2,1` clicks, `4=milk` sends a payload). `cssFor(key, value)` is the key
+table as a pure function. Unknown kinds and keys are logged once.
 
-Open: whether `Edges` should also cross the boundary as one value (fewer
-commands) or stay four keys (smaller `PropValue`); whether `button` and
-`input` should be boxes with a `role` key instead of kinds; the first
-non-DOM renderer decides both. It has: see section 10.
+`web/` holds the browser pages. `web/main.js` bundles `../hd-lang/host/web.ts`, the generated
+`counter.host.mjs` and the provider with esbuild, and binds them as `host/run.ts` does for Node. One
+glue file serves all three examples, because the trait belongs to `ui-dom`.
 
-## 8. Probe (2026-11-02, `cf5040b4a`, `hd test`: 3 passed)
+## The terminal provider
 
-Established: `@derive(Eq)` works on structs and enums with `f32` payloads
-and optional fields; a chained builder over `Style { ...self, gap: .Some(px) }`
-works; a default argument may be a call (`style: Style = Style::empty()`);
-a field-by-field diff to `(key, PropValue)` pairs is a plain function;
-`match` arms must be on their own lines (an inline `match x: .A => 1, .B => 2`
-is `syntax-error`).
+`ui-tui/providers/tui.mjs` runs under Node: a retained tree, a pure layout pass, a cell painter,
+then keys and focus. Importing it touches nothing until the first `apply`.
 
-```hd
-@derive(Eq, Debug)
-pub enum Size:
-    Px(f32)
-    Pct(f32)
-    Auto
-    Fill
+**Layout** is an embedded flexbox pass of about 290 lines, not yoga-layout or taffy-wasm. Those are
+asynchronous Wasm to load, would be the repo's first npm or vendored binary dependency, and calculate
+in floats that a cell grid has to round anyway. `place` is pure and memoized per pass, because a box
+measures a child and then lays it out, which is otherwise exponential in depth. Sizes are border box,
+as React Native's, and text wraps at its box.
 
-@derive(Eq, Debug)
-pub struct Color:
-    pub r: u8
-    pub g: u8
-    pub b: u8
-    pub a: u8
+**Units.** A cell is 8 by 16 logical pixels, so `padding(16)` is two columns and one row, and
+`padding_y(4)` rounds to no rows.
 
-@derive(Eq, Debug)
-pub struct Style:
-    pub gap: f32?
-    pub width: Size?
-    pub background: Color?
-    pub row: bool?
+**Painting** fills a grid of cells and writes only rows that changed, each a full width, so nothing
+needs erasing. An erase at the last column would take the border with it. Color follows the terminal's
+depth (truecolor, 256 or none). Text with no color contrasts with the background it is on, because a
+terminal's default may be light where the DOM's is black, and over no background the terminal's own
+color stands.
 
-impl Style:
-    pub fn empty() -> Style:
-        Style { gap: .None, width: .None, background: .None, row: .None }
+**Keys.** Tab and Shift-Tab move the focus, Enter and Space click, Space toggles a checkbox, and
+typing, Left, Right, Home, End, Backspace and Delete edit a field. A left press focuses the nearest
+listening node under it and clicks it, and a field only takes the focus. `q` quits except in a field,
+where it is a letter. Ctrl-C always quits.
 
-    pub fn gap(self, px: f32) -> Style:
-        Style { ...self, gap: .Some(px) }
+**A key is read when hd asks for an event, not when it arrives,** so each sees the tree the previous
+key's event left. It cannot append to a value a batch is about to replace, or act on a row a click is
+about to remove.
 
-    pub fn width(self, size: Size) -> Style:
-        Style { ...self, width: .Some(size) }
+**Focus** starts on the first node with a listener. It shows as reverse video inside the border, or a
+cursor in a field. When its node goes, it passes to whatever holds its position. A page taller than the
+screen scrolls to keep the focus in view; boxes do not scroll.
 
-    pub fn bg(self, color: Color) -> Style:
-        Style { ...self, background: .Some(color) }
+**Off a terminal** it prints each changed frame as plain text, and the end of a piped stdin ends the
+loop, so `printf '\t\rq' | hd run counter-tui` is a test.
 
-@derive(Eq, Debug)
-pub enum PropValue:
-    Number(f32)
-    Text(string)
-    Flag(bool)
-    Paint(Color)
-    Extent(Size)
-    Unset
+**Getting the terminal back,** whatever happens:
 
-pub fn diff(last: Style, next: Style) -> List[(string, PropValue)]:
-    let mut out: List[(string, PropValue)] = []
-    if last.gap != next.gap:
-        value := match next.gap:
-            .Some(v) => PropValue.Number(v)
-            .None => PropValue.Unset
-        out.push(("gap", value))
-    if last.width != next.width:
-        value := match next.width:
-            .Some(v) => PropValue.Extent(v)
-            .None => PropValue.Unset
-        out.push(("width", value))
-    if last.background != next.background:
-        value := match next.background:
-            .Some(v) => PropValue.Paint(v)
-            .None => PropValue.Unset
-        out.push(("background", value))
-    out
+- A clean end, a panic or a passed deadline aborts `instanceSignal`, and the provider restores the
+  screen and raw mode. Without this a panic would leave stdin holding the process open.
+- While the alternate screen is up, fd 2 is an unlinked file, printed on leaving, so a panic's message
+  survives and stderr cannot scribble on the screen. Close 2 and POSIX gives the next open the lowest
+  free descriptor, which is how Node can do `dup2`. This happens only when stderr is a terminal.
+- Keys are read on their own thread, so Ctrl-C is seen even with the main thread stuck in a Wasm loop,
+  where in raw mode it is only a byte. If the main thread shows no sign a second later, the thread sends
+  SIGKILL.
+- A guard, a small `sh` in its own session, waits on a pipe from the provider. If the pipe closes while
+  it runs, the provider died without cleaning up, and it leaves the alternate screen and restores `stty`.
+  A clean exit kills it first.
+- `--time-limit` runs the program in a worker, where `process.stdin` is not the real one, so the provider
+  opens fds 0 and 1 itself and polls the window size.
 
-fn column(style: Style = Style::empty(), children: fn() -> void) -> f32:
-    children()
-    match style.gap:
-        .Some(g) => g
-        .None => 0.0
+**Limits:**
 
-tests:
-    it("Eq on f32 fields and chained style"):
-        s := Style::empty().gap(8.0).width(.Fill)
-        assert_equal(s.gap, .Some(8.0), reason="gap set")
-        assert_equal(s == Style::empty().gap(8.0).width(.Fill), true, reason="structural Eq")
-    it("diff emits only changed keys"):
-        a := Style::empty().gap(8.0).bg(Color { r: 1, g: 2, b: 3, a: 255 })
-        b := Style::empty().gap(8.0)
-        assert_equal(diff(a, b), [("background", .Unset)], reason="one change")
-    it("call default and trailing block"):
-        g := column:
-            pass
-        assert_equal(g, 0.0, reason="default style")
-        h := column(style=Style::empty().gap(4.0)):
-            pass
-        assert_equal(h, 4.0, reason="named style")
-```
+- Under `--time-limit`, a panic's first line is lost on a real screen unless stderr is redirected, because
+  closing fd 2 from a worker makes Node print a warning.
+- Mouse reporting takes selection from the terminal; most give it back under Shift.
+- While a program is stuck only Ctrl-C works, not `q`, and a synchronous computation over a second counts as
+  stuck.
+- A process killed this way reports status 1.
+- The fd 2 swap, the worker path, the key thread, the guard and real mouse input need a real terminal, so
+  `tui.test.mjs` cannot reach them. They were checked by hand in tmux.
 
-## 9. Deviations in the implementation (commit `a3f6f05`)
+## Native renderers
 
-Recorded with their reasons in `design.md`, phase 12:
+A GPUI or other native renderer cannot be bound as a package host trait today: package providers run only on
+JavaScript hosts (`cli.host.package.javascript`), which [hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191)
+tracks. This comes from reading the source at `cf5040b4a`, since this `hd` build has no wasmtime engine to run.
 
-- The box builder is `view`, not `box` (section 4). The node kind is
-  still `"box"`.
-- Two kinds the design did not list: `"fragment"` (the `show` and
-  `for_each` wrappers, `display: contents` in the DOM) and `"checkbox"`
-  with a `checked` flag (section 3).
-- Enum payload fields are named (`Number(value: f32)`), because enum
-  fields cross the ABI by name (section 2).
-- `SetText` applies to `"button"` nodes as well as `"text"`.
-- `attr` / `attr_live` survive as the `dom:attr:NAME` escape hatch.
+**`hd_run_wasmtime` is closed in two places.** `WasmtimeEngine::load` refuses any module with an
+`hd.capabilities` section (`engine.rs:240`). Past that, the `Linker` is made and filled inside `instantiate_host`
+(`engine.rs:141`), imports dispatch through a closed `Kind` enum (`host/call.rs`), and the store's `Host` type is
+private. No public API takes an extra import.
 
-## 10. The first non-DOM renderer (`ui-tui`, phase 16)
+**Driving is already open.** `hd_run::Instance` is public, with `init`, `poll`, `wake` and `completed`, and
+`WasmtimeInstance` implements it, so an embedder could run turns from GPUI's foreground executor. The JS core has
+the matching `createDriver` (`cli.host.driver.*`).
 
-`ui-tui/providers/tui.mjs` implements layers 2 and 3 for a terminal, with no
-change to the protocol, to `Style` or to the kinds and keys. Reasons and limits
-are in `design.md`, phase 16. What it decided or changed here:
+**A raw `wasmtime` embedder is possible but not an open path.** `counter-tui.wasm` imports only seven `hd:pkg:<hash>`
+functions and four from `hd:rt`, and `hd_host_abi::schema::from_wasm` returns the checked contract. A Rust program could
+link them, but would own the exchange-buffer codec, which exists only as generated JavaScript, the driver, and every other
+host trait the app names (the fetcher adds `hd:Clock`), against an ABI that is not stable and a module name that holds a
+directory hash.
 
-- **Edges stay four keys.** The provider reads each by name and four
-  `SetProp`s cost nothing a batch notices.
-- **`button` and `input` stay kinds.** The terminal draws them differently from
-  a box: a centered label and brackets, a cursor and a field that keeps its own
-  text. A `role` key would carry the same switch with less checking.
-- **Unknown `dom:` keys need no special case:** a key with any prefix is another
-  renderer's.
-- **`color` and `font_weight` inherit** on the terminal as on the DOM (section
-  3 promises neither), because `text_live` takes no style and the examples style
-  live text from a wrapping `view`.
-- **`Fill` follows the axis:** on the main-axis key it grows, on the cross-axis
-  key it stretches. The DOM provider applies both to either key, a quirk of its
-  one CSS shorthand, so a `width: Fill` in a column also grows there.
-- **Scale:** a cell is 8 by 16 logical pixels; any nonzero border is one cell.
-- **Not followed:** `wrap`, `font_size`, `font_family`, `cursor`. `overflow:
-  scroll` clips as `hidden` does, and `opacity` under 1 is the dim attribute.
+**What #1191 should decide:**
 
-The vocabulary's promise of "no inheritance" is now true of neither renderer
-that exists. Whether to promise inheritance of `color` instead is worth deciding
-before a third; `text_live` taking a style would remove the need.
+1. Binding shape: a generated Rust trait plus codec, passed to an engine API at instantiation, as the analogue of
+   `NAME.host.mjs`. A GPUI app is a Rust binary that owns `main` and embeds hd, so a dylib adds problems it does not need.
+2. Consent stays as it is: `[capabilities]` in the app's manifest, checked by the embedder as the invoker.
+3. Value conversion mirrors `module.host.package.js-values`: enums with named payload fields become Rust enums with the
+   same names.
+4. How a native provider's completions reach the guest. `completed()` returns the engine's own reactor batch, and on a
+   first look there is no way to add to it from outside. A pending `next_event.start` needs one. Not checked by a run.
+
+The terminal provider shows what such a renderer would keep: the protocol needed no change, and the split into retained
+tree, pure layout and paint carries over, with taffy in place of `place` and GPUI's own focus.

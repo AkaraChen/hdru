@@ -1,4 +1,4 @@
-## Theme replaces the cascade (`rendering.md`, section 5). A component that
+## Theme replaces the cascade (`docs/rendering.md`). A component that
 ## needs colors names `Theme` in its row, `$ Ui + Theme`, so a missing theme
 ## is a compile error. The palette is a signal: read it with `peek` for a
 ## static style, with `get` inside `style_live` to follow it, so dark mode

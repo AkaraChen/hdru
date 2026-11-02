@@ -1,5 +1,4 @@
-# The probe that established roadmap rule 4 (docs/roadmap.md, section 6),
-# kept as the first test of row-polymorphic builders. Its `Ui` is a
+# The smallest example of row-polymorphic builders (docs/design.md, rule 4). Its `Ui` is a
 # stand-in with a depth counter; the library's `Scope` takes its place.
 use std.testing.assert_equal
 

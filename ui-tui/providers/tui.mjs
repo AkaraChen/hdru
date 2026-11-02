@@ -11,10 +11,10 @@
 // stdin may be a pipe, whose end also sends handler 0:
 //   printf '\t\rq' | hd run counter-tui
 //
-// This is the terminal's half of rendering.md: section 3's kinds and keys as
+// This is the terminal's half of rendering.md: its kinds and keys as
 // far as a cell grid can follow them. Unknown kinds are boxes, unknown keys
 // are dropped, and a key with a renderer prefix ("dom:...") is another
-// renderer's. docs/design.md, phase 16, records where it departs.
+// renderer's. docs/rendering.md says where it departs.
 //
 // Commands arrive as { tag, fields }; see ui-dom/providers/dom.mjs. Each part
 // is exported for providers/tui.test.mjs, which needs no terminal; importing
@@ -31,7 +31,7 @@ import { Worker, isMainThread } from "node:worker_threads";
 // ---- Units ---------------------------------------------------------------
 //
 // The vocabulary's numbers are logical pixels and a renderer applies its own
-// scale (rendering.md section 7). A cell is taken as 8 by 16 pixels, the
+// scale. A cell is taken as 8 by 16 pixels, the
 // usual terminal font, so `padding(16)` is two columns and one row. Any
 // nonzero border is one cell, the only width a box-drawing glyph has.
 

@@ -1,11 +1,10 @@
 # ui: a Solid-style reactive UI library for hd
 
 Run-once components, signal handles, memos, effects, an owner tree, keyed
-collections, and a command stream over the Wasm boundary to a small DOM
-adapter or a terminal. `docs/bootstrap.md` is the plan that built phases 0 to 8,
-`docs/design.md` the record of what was built and why, `docs/roadmap.md`
-what comes next, `docs/rendering.md` the renderer protocol and style
-design, and `docs/packages.md` the split into packages:
+collections, and a command stream over the Wasm boundary to a DOM or a terminal.
+`docs/design.md` explains how it works and why, `docs/rendering.md` covers the
+renderer protocol, style and the two renderers, and `docs/packages.md` the
+workspace:
 
 - `reactive`: signals, memos, effects, owners, context. No nodes, no host.
 - `ui`: the `Ui` row, builders, `show`, `for_each`, inputs, resources,
@@ -60,7 +59,7 @@ needs lexically, `let clock: *mut dyn Clock = $.use(Clock)` before the
 each load in a `std.task` policy such as `timeout(ms(5000))` or
 `retry(Backoff {})`.
 
-Tests run on the Node engine only; wasmtime is out of scope for now.
+Tests run on the Node engine only; this `hd` build has no wasmtime engine.
 
 ## Prerequisites
 
@@ -68,7 +67,7 @@ Tests run on the Node engine only; wasmtime is out of scope for now.
   commit `cf5040b4a`. The browser build imports its `host/*.ts` directly.
 - The `hd` binary built from it: `cargo install --path crates/hd_cli`
   inside `../hd-lang` (lands in `~/.cargo/bin/hd`). The Node engine is the
-  default; this package does not run under wasmtime.
+  default, and the renderers cannot run under wasmtime.
 - Node 20 or newer, and `pnpm` (for `pnpm dlx esbuild`) if you build the
   browser pages.
 - Do not run `hd fmt` without `hd check` after it: see
