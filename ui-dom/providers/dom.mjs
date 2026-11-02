@@ -123,6 +123,7 @@ const kinds = {
   button: { tag: "button", css: {} },
   input: { tag: "input", css: {}, type: "text" },
   "dom:textarea": { tag: "textarea", css: {} },
+  "dom:a": { tag: "a", css: {} },
   checkbox: { tag: "input", css: {}, type: "checkbox" },
   fragment: { tag: "div", css: { display: "contents" } },
 };

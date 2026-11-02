@@ -37,8 +37,13 @@ pub fn styled_node(kind: string, style: Style) -> NodeId $ Ui:
 ## block runs now under the caller's row. `column` and `row` are views
 ## with the direction set.
 pub fn view[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+    container("box", style, children)
+
+## A node of `kind` holding what its block builds, for a renderer package's own
+## kinds of container, as `ui-dom`'s `link`. `last_node()` names it afterwards.
+pub fn container[$R](kind: string, style: Style, children: fn() -> void $ Ui + R) -> void $ Ui + R:
     owner := $.use(Owner).owner()
-    node := styled_node("box", style)
+    node := styled_node(kind, style)
     $.with(Parent=box(Scope { owner: owner, parent: node })):
         children()
     mark_built(node)

@@ -2,7 +2,7 @@
 ## other renderers ignore, so code that reaches past the portable vocabulary
 ## shows it in its imports (`rendering.md`).
 use std.function.{Fn, FnMut}
-use dep.ui.{Mutate, PropValue, Signal, Style, Track, Ui, on, prop, text_field}
+use dep.ui.{Mutate, PropValue, Signal, Style, Track, Ui, container, on, prop, text_field}
 
 ## `dom_class`, as a chain method on `ui`'s `Style`.
 pub trait DomStyle:
@@ -33,6 +33,14 @@ pub fn attr[F < 'static & Fn() -> string $ Track](name: string, value: F) -> voi
 ## payload is a `CustomEvent`'s string `detail`, else the target's value.
 pub fn dom_on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Ui:
     on("dom:$event", fn(payload: string) -> void $ Mutate: handler(payload))
+
+## A link to `href`, holding what its block builds. It opens in a new tab, and
+## `last_node()` names it afterwards, so `attr` can label it.
+pub fn link[$R](href: string, style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+    container("dom:a", style, children)
+    attr("href", fn(): href)
+    attr("target", fn(): "_blank")
+    attr("rel", fn(): "noopener noreferrer")
 
 ## A multi-line text field bound to `value`, as `ui`'s `input` is.
 pub fn textarea(value: Signal[string], style: Style = Style::empty()) -> void $ Ui:

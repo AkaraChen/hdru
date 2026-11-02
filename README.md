@@ -281,7 +281,7 @@ cd examples/todos && hd run todos-tui
 | --- | --- |
 | `reactive/` | signals, memos, effects, owners, context; no nodes and no host |
 | `ui/` | the `Ui` row, builders, `show`, `for_each`, inputs, resources, `Style`, `Theme`, the command protocol, the `Renderer` trait and its loop, `Recorder` |
-| `ui-dom/` | the browser renderer: the `Surface` host trait, `run_app!`, the JavaScript provider, and what only the DOM has (`attr`, `dom_class`, `dom_on`, `textarea`) |
+| `ui-dom/` | the browser renderer: the `Surface` host trait, `run_app!`, the JavaScript provider, and what only the DOM has (`attr`, `dom_class`, `dom_on`, `link`, `textarea`) |
 | `ui-tui/` | the terminal renderer: the `Surface` host trait, `run_app!`, the JavaScript provider |
 | `playground/` | an hdru playground written in hdru, DOM-only |
 | `examples/` | `counter`, `todos` and `fetcher`, each with its app in `src/lib.hd` and an entry per renderer |

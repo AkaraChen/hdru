@@ -12,7 +12,7 @@ a node kind, a property or an event. [`rendering.md`](rendering.md) has the tabl
 | --- | --- | --- |
 | nothing about nodes | `reactive` | `signal`, `memo`, `effect`, owners, context |
 | the protocol, and a meaning every renderer can give it | `ui` | `button`, `input`, `Style`, `Theme`, `Command`, `resource`, the loop `run_on!`, `Recorder` |
-| one platform | that renderer: `ui-dom`, `ui-tui` | the `Surface` host trait, providers, `attr`, `dom_class`, `dom_on`, `textarea` |
+| one platform | that renderer: `ui-dom`, `ui-tui` | the `Surface` host trait, providers, `attr`, `dom_class`, `dom_on`, `link`, `textarea` |
 | one program | the app | the playground's `Workbench` and its compiler protocol |
 
 Imports go one way, and a package names only what is below it:
@@ -40,9 +40,9 @@ rule in `ui` needs a reason in `ui`'s own terms.
 ## Names show the layer
 
 A property key, node kind or event without a prefix is portable. A prefix says whose it is, and the other renderers
-ignore it: `dom:class`, `dom:attr:title`, `dom:textarea`, `dom:focus`.
+ignore it: `dom:class`, `dom:attr:title`, `dom:textarea`, `dom:a`, `dom:focus`.
 
-`ui` emits no prefixed name itself. It has four neutral extension points, on which a renderer builds its own words:
+`ui` emits no prefixed name itself. It has five neutral extension points, on which a renderer builds its own words:
 
 | Extension point | What it does | Built on it, in `ui-dom` |
 | --- | --- | --- |
@@ -50,6 +50,7 @@ ignore it: `dom:class`, `dom:attr:title`, `dom:textarea`, `dom:focus`.
 | `Style.host_prop(key, value)` | a key beyond the portable ones, in a `Style` | `DomStyle.dom_class` |
 | `on(event, handler)` | a handler for an event on `last_node()` | `dom_on` |
 | `text_field(kind, value, style)` | a field bound to a signal | `textarea` |
+| `container(kind, style, children)` | a node holding what its block builds | `link` |
 
 The point is the import. Using `attr` means writing `use dep.ui_dom.attr`, so a component that only works in a browser
 says so, and `use dep.ui.attr` does not compile.

@@ -57,7 +57,7 @@ A host answers with `UiEvent { handler, payload }`. Handler 0 ends the loop.
 - **Namespaces.** A property key, node kind or event without a prefix is portable. One with
   a renderer prefix belongs to that renderer and is ignored by the others: `dom:class`,
   `dom:attr:aria-label`, `dom:textarea`, `dom:focus`. This replaces a raw command. `ui` emits
-  none of them itself: it offers `prop`, `Style.host_prop`, `on` and `text_field`, and a
+  none of them itself: it offers `prop`, `Style.host_prop`, `on`, `text_field` and `container`, and a
   renderer package builds its words on those, so non-portable code shows in its imports.
 - **Numbers are `f32` logical pixels**, and each renderer applies its own scale.
 
@@ -77,6 +77,7 @@ grid, absolute positioning, transforms, animation, shadows, pseudo-states.
 | `input` | `input type=text` | a field with a cursor | `value` property |
 | `checkbox` | `input type=checkbox` | `[x]` / `[ ]` | `checked` property |
 | `fragment` | `div`, `display: contents` | no box at all | groups without layout; `show` and `for_each` render into one |
+| `dom:a` | `a` | a box | a link holding what its block builds, `dom:attr:href`; `ui-dom`'s `link` |
 | `dom:textarea` | `textarea` | a box | multi-line field, `value` property and `input` events; `ui-dom`'s `textarea` |
 
 `button` and `input` stay kinds, not boxes with a `role` key: both renderers draw them

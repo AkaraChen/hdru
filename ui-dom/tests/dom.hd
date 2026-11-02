@@ -1,5 +1,5 @@
 use dep.ui.{Command, PropValue, Style, Ui, UiEvent, column, dispatch, input, mount, reset_for_test, signal, take_commands, text, view}
-use pkg.{DomStyle, attr, dom_on, textarea}
+use pkg.{DomStyle, attr, dom_on, link, textarea}
 use std.testing.assert_equal
 
 it("dom_class lowers to the dom:class key"):
@@ -52,3 +52,19 @@ it("dom_on listens under the dom: prefix, and input under a portable name"):
     assert_equal(commands.contains(.Listen(1, "dom:focus", 2)), true, reason="the DOM's own")
     dispatch(UiEvent { handler: 2, payload: "x" })
     assert_equal(seen.peek(), "x", reason="the handler ran")
+
+it("link is a container of the dom:a kind, and attr then labels it"):
+    reset_for_test()
+    _ := mount(
+        fn() -> void $ Ui:
+            link("https://example.com"):
+                text(fn(): "site")
+            attr("aria-label", fn(): "the site")
+        ,
+    )
+    commands := take_commands()
+    assert_equal(commands.get(0).copied(), .Some(Command.Create(1, "dom:a")), reason="its kind")
+    assert_equal(commands.contains(.Append(1, 2)), true, reason="it holds its block")
+    assert_equal(commands.contains(.SetProp(1, "dom:attr:href", .Text("https://example.com"))), true, reason="the target")
+    assert_equal(commands.contains(.SetProp(1, "dom:attr:rel", .Text("noopener noreferrer"))), true, reason="no opener")
+    assert_equal(commands.contains(.SetProp(1, "dom:attr:aria-label", .Text("the site"))), true, reason="labelled")

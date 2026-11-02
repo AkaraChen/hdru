@@ -29,11 +29,13 @@ use dep.ui.{
     text,
     view,
 }
-use dep.ui_dom.{DomStyle, attr, dom_on, textarea}
+use dep.ui_dom.{DomStyle, attr, dom_on, link, textarea}
 pub use pkg.workbench.{Problem, Report, Workbench}
 
 # The most command log text kept, in characters.
 LOG_LIMIT := 20000
+
+REPOSITORY := "https://github.com/Eric-Song-Nop/hdru"
 
 EXAMPLES := ["counter", "todos", "fetcher", "type-error"]
 
@@ -235,6 +237,10 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
             attr("id", fn(): "theme-toggle")
             attr("aria-label", fn(): theme_label(dark.get()))
             attr("title", fn(): theme_label(dark.get()))
+            link(REPOSITORY, style=Style::empty().dom_class("btn btn-icon github-link")):
+                pass
+            attr("aria-label", fn(): "hdru on GitHub")
+            attr("title", fn(): "hdru on GitHub")
         row(style=Style::empty().grow(1.0).min_height(.Px(0.0)).dom_class("workspace")):
             column(style=Style::empty().grow(1.0).width(.Pct(50.0)).min_height(.Px(0.0)).dom_class("half half-left")):
                 # The field on top edits; the same text behind it shows the
