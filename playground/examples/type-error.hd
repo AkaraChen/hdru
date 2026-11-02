@@ -1,13 +1,16 @@
 # Reading a signal in a component body is Solid's classic trap: it runs and
-# never updates. Here it does not compile. Move the read into `text_live:`.
+# never updates. Here it does not compile. Read it inside the closure instead:
+# text(fn(): "${count.get()}")
 use dep.ui_dom.{Surface, run_app}
 use dep.ui.{Ui, button, column, signal, text}
 
 fn app() -> void $ Ui:
     count := signal(+0)
+    n := count.get()
     column:
-        text("${count.get()}")
-        button("+1", fn(): count.update(fn(n): n + 1))
+        text(fn(): "$n")
+        button(fn(): count.update(fn(n): n + 1)):
+            text(fn(): "+1")
 
 pub fn main!() -> void $ Surface:
     run_app!(app)

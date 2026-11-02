@@ -15,7 +15,6 @@ use pkg.{
     signal,
     take_commands,
     text,
-    text_live,
     use_context,
     use_given,
     given,
@@ -33,7 +32,7 @@ fn themed_text() -> void $ Ui:
     name := match use_context::[Theme]("theme"):
         .Some(theme) => theme.name
         .None => "none"
-    text(name)
+    text(fn(): name)
 
 it("a descendant reads what an ancestor provided, through any depth"):
     reset_for_test()
@@ -76,15 +75,15 @@ it("a nearer provide shadows an outer one"):
 fn shared_counter() -> void $ Ui:
     match use_context::[Signal[i32]]("count"):
         .Some(count) =>
-            text_live:
+            text:
                 "Count: ${count.get()}"
             button(
-                "+",
                 fn():
                     count.update(fn(n): n + 1)
                 ,
-            )
-        .None => text("no count")
+            ):
+                text(fn(): "+")
+        .None => text(fn(): "no count")
 
 it("a signal provided through context is shared state"):
     reset_for_test()
@@ -97,7 +96,7 @@ it("a signal provided through context is shared state"):
     dispatch(UiEvent { handler: 1, payload: "" })
     assert_equal(
         take_commands(),
-        [.SetText(2, "Count: 1"), .SetText(4, "Count: 1")],
+        [.SetText(2, "Count: 1"), .SetText(5, "Count: 1")],
         reason="both readers see the write",
     )
 
@@ -118,7 +117,9 @@ fn themed[$R](theme: *mut Dark, body: fn() -> void $ R + Palette) -> void $ R:
         body()
 
 fn palette_text() -> void $ Ui + Palette:
-    text("${$.use(Palette).name()} under ${parent_node()}")
+    # A key is read here: the block runs later, with only `Track`.
+    line := "${$.use(Palette).name()} under ${parent_node()}"
+    text(fn(): line)
 
 fn parent_node() -> usize $ Ui:
     $.use(Parent).parent()
@@ -136,11 +137,11 @@ it("a typed key reaches a component through two columns"):
 fn titled() -> void $ Ui + Provided[Theme]:
     theme := use_given::[Theme]()
     column:
-        text(theme.name)
+        text(fn(): theme.name)
         # A retained callback runs later under `Track + Mutate` only, so it
         # captures the value lexically instead of naming the key.
         # It reads no signal, so its row is written out (design.md, rule 1).
-        text_live(fn() -> string $ Track: "live ${theme.name}")
+        text(fn() -> string $ Track: "live ${theme.name}")
 
 it("given supplies a value through the generic Provided key"):
     reset_for_test()

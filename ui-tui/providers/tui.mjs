@@ -271,15 +271,25 @@ function clamp(value, low, high) {
   return out;
 }
 
-// The children that take part in layout: a fragment's stand in for it.
-function flowChildren(node) {
+function flattened(node) {
   const out = [];
   for (const child of node.children) {
-    if (child.kind === "fragment") out.push(...flowChildren(child));
+    if (child.kind === "fragment") out.push(...flattened(child));
     else out.push(child);
   }
   return out;
 }
+
+// A button that holds only text is one label: it centers, wraps and takes its
+// brackets as a whole. A button holding anything else lays out as a box.
+const isLabel = (node) => node.kind === "button" && flattened(node).every((child) => child.kind === "text");
+
+// The children that take part in layout: a fragment's stand in for it.
+function flowChildren(node) {
+  return isLabel(node) ? [] : flattened(node);
+}
+
+const contentOf = (node) => (isLabel(node) ? flattened(node).map((child) => child.text).join("") : node.text);
 
 // A button draws brackets when nothing else marks it: the DOM's button has
 // chrome of its own, and a terminal has none.
@@ -288,7 +298,7 @@ function bracketed(node) {
 }
 
 function labelOf(node) {
-  return bracketed(node) ? `[${node.text}]` : node.text;
+  return bracketed(node) && isLabel(node) ? `[${contentOf(node)}]` : contentOf(node);
 }
 
 function leafContent(node, innerW) {
@@ -520,7 +530,7 @@ function contrast(background) {
 }
 
 // What `node` takes from its ancestors. rendering.md promises no inheritance,
-// but `text_live` takes no style, so a live text is styled by the view around
+// but `text` takes no style, so text is styled by the view around
 // it and the examples rely on the DOM passing that down. GPUI passes color as
 // well. Fragments count: `show` may be restyled though it takes no layout.
 function inherited(node) {

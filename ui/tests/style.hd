@@ -17,7 +17,6 @@ use pkg.{
     lower,
     mount,
     prop,
-    prop_live,
     provide_theme,
     reset_for_test,
     rgb,
@@ -79,28 +78,34 @@ it("view sets no direction; column and row override one"):
         reason="a view is a column by default without saying so",
     )
 
-it("text and button take a style; without one they emit no SetProp"):
+it("view and button take a style; without one they emit no SetProp"):
     reset_for_test()
     _ := mount:
-        text("hi", style=Style::empty().font_size(18.0).host_prop("dom:class", .Text("lead")))
-        button("go", fn() -> void $ Mutate: pass, style=Style::empty().cursor(.Pointer))
-        text("plain")
+        view(style=Style::empty().font_size(18.0).host_prop("dom:class", .Text("lead"))):
+            text(fn(): "hi")
+        button(fn() -> void $ Mutate: pass, style=Style::empty().cursor(.Pointer)):
+            text(fn(): "go")
+        text(fn(): "plain")
     assert_equal(
         take_commands(),
         [
-            .Create(1, "text"),
+            .Create(1, "box"),
             .SetProp(1, "font_size", .Number(18.0)),
             .SetProp(1, "dom:class", .Text("lead")),
             .Append(0, 1),
-            .SetText(1, "hi"),
-            .Create(2, "button"),
-            .SetProp(2, "cursor", .Text("pointer")),
-            .Append(0, 2),
-            .SetText(2, "go"),
-            .Listen(2, "click", 1),
-            .Create(3, "text"),
+            .Create(2, "text"),
+            .Append(1, 2),
+            .SetText(2, "hi"),
+            .Create(3, "button"),
+            .SetProp(3, "cursor", .Text("pointer")),
             .Append(0, 3),
-            .SetText(3, "plain"),
+            .Listen(3, "click", 1),
+            .Create(4, "text"),
+            .Append(3, 4),
+            .SetText(4, "go"),
+            .Create(5, "text"),
+            .Append(0, 5),
+            .SetText(5, "plain"),
         ],
         reason="a renderer's key is spelled out where it is used",
     )
@@ -127,39 +132,40 @@ it("style_live restyles the enclosing container by key"):
                 else:
                     if n == 1: Style::empty().opacity(1.0).radius(6.0) else: Style::empty().radius(6.0)
             button(
-                "up",
                 fn():
                     level.update(fn(n): n + 1)
                 ,
-            )
-            button("same", fn(): level.set(level.peek()))
+            ):
+                text(fn(): "up")
+            button(fn(): level.set(level.peek())):
+                text(fn(): "same")
     commands := take_commands()
     assert_equal(commands.contains(.SetProp(1, "opacity", .Number(1.0))), true, reason="the first run")
     assert_equal(click(1), [.SetProp(1, "radius", .Number(6.0))], reason="only the new key")
     assert_equal(click(2), [], reason="an equal style emits nothing")
     assert_equal(click(1), [.SetProp(1, "opacity", .Unset)], reason="a key that went unset")
 
-it("prop and prop_live set a key on the last node"):
+it("prop sets a key on the last node, following what it reads"):
     reset_for_test()
     _ := mount:
         level := signal(+1)
         column:
-            text("a")
-            prop("x:title", .Text("first"))
-        prop("x:id", .Text("main"))
-        text("meter")
-        prop_live(
+            text(fn(): "a")
+            prop("x:title", fn(): PropValue.Text("first"))
+        prop("x:id", fn(): PropValue.Text("main"))
+        text(fn(): "meter")
+        prop(
             "x:level",
             fn():
-                if level.get() > 2: "high" else: "low"
+                PropValue.Text(if level.get() > 2: "high" else: "low")
             ,
         )
         button(
-            "up",
             fn():
                 level.update(fn(n): n + 1)
             ,
-        )
+        ):
+            text(fn(): "up")
     commands := take_commands()
     assert_equal(commands.contains(.SetProp(2, "x:title", .Text("first"))), true, reason="the text inside")
     assert_equal(commands.contains(.SetProp(1, "x:id", .Text("main"))), true, reason="the column, after its block")
@@ -182,7 +188,7 @@ it("last_node names the container after its block has run"):
     seen := box([0])
     _ := mount:
         column:
-            text("a")
+            text(fn(): "a")
         seen.push(last_node())
     assert_equal(seen[1], 1, reason="the column")
 
@@ -191,7 +197,8 @@ fn card() -> void $ Ui + Theme:
     column(style=Style::empty().padding(12.0)):
         style_live:
             Style::empty().bg(theme.get().surface)
-        text("hello", style=Style::empty().color(theme.peek().on_surface))
+        view(style=Style::empty().color(theme.peek().on_surface)):
+            text(fn(): "hello")
 
 it("a theme switch is one signal write that restyles live styles"):
     reset_for_test()
@@ -199,7 +206,8 @@ it("a theme switch is one signal write that restyles live styles"):
     _ := mount:
         provide_theme(palette):
             card()
-        button("dark", fn(): palette.set(Palette::dark()))
+        button(fn(): palette.set(Palette::dark())):
+            text(fn(): "dark")
     commands := take_commands()
     assert_equal(
         commands.contains(.SetProp(1, "background", .Paint(Palette::light().surface))),

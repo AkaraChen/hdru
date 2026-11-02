@@ -12,7 +12,7 @@ use dep.ui.{
     row,
     signal,
     style_live,
-    text_live,
+    text,
     view,
 }
 use std.time.{Clock, ms}
@@ -51,7 +51,7 @@ fn profile(id: Signal[i32]) -> void $ Ui + Clock:
                 .Loading => Style::empty().color(p.muted)
                 .Ready(_) => Style::empty().color(p.on_surface)
                 .Failed(_) => Style::empty().color(rgb(190, 40, 40))
-        text_live:
+        text:
             describe(loaded.get())
 
 ## A button that reads on either palette.
@@ -64,22 +64,23 @@ pub fn app() -> void $ Ui + Clock:
     id := signal(+1)
     column(style=Style::empty().gap(8.0).padding(16.0).radius(8.0).border(1.0, p.line).bg(p.surface)):
         view(style=Style::empty().font_size(18.0).font_weight(600.0)):
-            text_live:
+            text:
                 "user ${id.get()}"
         profile(id)
         row(style=Style::empty().gap(4.0)):
             button(
-                "previous",
                 fn():
                     id.update(fn(n): n - 1)
                 ,
                 style=quiet(),
-            )
+            ):
+                text(fn(): "previous")
             button(
-                "next",
                 fn():
                     id.update(fn(n): n + 1)
                 ,
                 style=quiet(),
-            )
-            button("unlucky", fn(): id.set(+13), style=quiet())
+            ):
+                text(fn(): "next")
+            button(fn(): id.set(+13), style=quiet()):
+                text(fn(): "unlucky")

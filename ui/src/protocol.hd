@@ -19,7 +19,7 @@ pub enum Command:
     Remove(node: NodeId)
     ## Removes every child of `node`, keeping the node.
     Clear(node: NodeId)
-    ## The text of a "text" or "button" node.
+    ## The text of a "text" node.
     SetText(node: NodeId, text: string)
     ## Sets one property, or removes it when `value` is `Unset`. Keys are
     ## vocabulary; a renderer ignores a key it does not know, and a key

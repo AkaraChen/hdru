@@ -27,10 +27,9 @@ use dep.ui.{
     signal,
     style_live,
     text,
-    text_live,
     view,
 }
-use dep.ui_dom.{DomStyle, attr, attr_live, dom_on, textarea}
+use dep.ui_dom.{DomStyle, attr, dom_on, textarea}
 pub use pkg.workbench.{Problem, Report, Workbench}
 
 # The most command log text kept, in characters.
@@ -133,21 +132,21 @@ fn theme_label(dark: bool) -> string:
 fn panel_head[F < 'static & Fn() -> string $ Track](title: string, note: F) -> void $ Ui:
     row(style=Style::empty().align(.Center).gap(8.0).dom_class("panel-head")):
         view(style=Style::empty().dom_class("panel-title")):
-            text(title)
+            text(fn(): title)
         view(style=Style::empty().grow(1.0)):
             pass
         view(style=Style::empty().dom_class("panel-note")):
-            text_live(note)
+            text(note)
 
 # One problem. A row is keyed by its position, so the rows a list can ever hold
 # are as many as its longest report, however long the session.
 fn problem_row(item: ReadSignal[Problem], bench: *mut dyn Workbench) -> void $ Ui:
     view(style=Style::empty().dom_class("problem")):
-        text_live:
+        text:
             label(item.get())
-    attr_live("data-severity", fn(): item.get().severity)
-    attr("role", "button")
-    attr("tabindex", "0")
+    attr("data-severity", fn(): item.get().severity)
+    attr("role", fn(): "button")
+    attr("tabindex", fn(): "0")
     on("click", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
     on("enter", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
 
@@ -199,41 +198,43 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
             view(style=Style::empty().dom_class("brand-mark")):
                 pass
             view(style=Style::empty().dom_class("brand")):
-                text("hdru")
+                text(fn(): "hdru")
             view(style=Style::empty().dom_class("brand-sub")):
-                text("playground")
-            button("Run", fn(): start(), style=Style::empty().dom_class("btn btn-primary"))
-            button("Stop", fn(): bench.stop(), style=Style::empty().dom_class("btn"))
+                text(fn(): "playground")
+            button(fn(): start(), style=Style::empty().dom_class("btn btn-primary")):
+                text(fn(): "Run")
+            button(fn(): bench.stop(), style=Style::empty().dom_class("btn")):
+                text(fn(): "Stop")
             row(style=Style::empty().dom_class("tabs")):
                 for name in EXAMPLES:
                     button(
-                        name,
                         fn():
                             current.set(name)
                             source.set(bench.example(name))
                             start()
                         ,
                         style=Style::empty().dom_class("tab"),
-                    )
-                    attr_live("aria-pressed", fn(): pressed(current.get() == name))
+                    ):
+                        text(fn(): name)
+                    attr("aria-pressed", fn(): pressed(current.get() == name))
             view(style=Style::empty().grow(1.0)):
                 pass
             view(style=Style::empty().dom_class("status")):
-                text_live:
+                text:
                     status_text(latest.get())
-            attr_live("data-state", fn(): status_state(latest.get()))
+            attr("data-state", fn(): status_state(latest.get()))
             button(
-                "",
                 fn():
                     next := !dark.peek()
                     bench.set_dark(next)
                     apply_theme(dark, palette, next)
                 ,
                 style=Style::empty().dom_class("btn btn-icon theme-toggle"),
-            )
-            attr("id", "theme-toggle")
-            attr_live("aria-label", fn(): theme_label(dark.get()))
-            attr_live("title", fn(): theme_label(dark.get()))
+            ):
+                pass
+            attr("id", fn(): "theme-toggle")
+            attr("aria-label", fn(): theme_label(dark.get()))
+            attr("title", fn(): theme_label(dark.get()))
         row(style=Style::empty().grow(1.0).min_height(.Px(0.0)).dom_class("workspace")):
             column(style=Style::empty().grow(1.0).width(.Pct(50.0)).min_height(.Px(0.0)).dom_class("half half-left")):
                 # The field on top edits; the same text behind it shows the
@@ -242,19 +243,19 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
                     style_live:
                         Style::empty().bg(theme.get().surface)
                     view(style=Style::empty().font_size(13.0).dom_class("editor-gutter")):
-                        text_live:
+                        text:
                             numbers.get()
                     view(style=Style::empty().padding(12.0).font_size(13.0).dom_class("editor-back")):
-                        text_live:
+                        text:
                             source.get()
-                    attr("id", "editor-back")
+                    attr("id", fn(): "editor-back")
                     textarea(source, style=Style::empty().padding(12.0).font_size(13.0).dom_class("editor-input"))
                 view(style=Style::empty().dom_class("dock")):
                     panel_head("Problems", fn(): "${problems.get().len()}")
                     view(style=Style::empty().max_height(.Px(160.0)).dom_class("pane")):
                         show(fn(): problems.get().is_empty()):
                             view(style=Style::empty().dom_class("empty")):
-                                text("Nothing to fix.")
+                                text(fn(): "Nothing to fix.")
                         for_each(problems, fn(p): p.id, fn(item): problem_row(item, bench))
             column(style=Style::empty().grow(1.0).width(.Pct(50.0)).min_height(.Px(0.0)).dom_class("half")):
                 panel_head("Preview", fn(): "sandboxed")
@@ -262,17 +263,17 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
                     style_live:
                         Style::empty().bg(theme.get().surface)
                     view(style=Style::empty().dom_class("stage-note")):
-                        text_live:
+                        text:
                             preview_note(ran.get(), latest.get())
                     view(style=Style::empty().dom_class("stage-frame")):
                         pass
-                    attr("id", "preview")
+                    attr("id", fn(): "preview")
                 panel_head("Commands", fn(): "what the UI sends its renderer")
                 view(style=Style::empty().grow(1.0).height(.Px(0.0)).dom_class("pane log")):
-                    text_live:
+                    text:
                         log.get()
                 # Both act on the view just built.
-                attr("id", "commands")
+                attr("id", fn(): "commands")
                 dom_on("preview-log", fn(more: string) -> void $ Mutate: log.update(fn(now): appended(now, more)))
 
 ## The playground.
@@ -284,7 +285,7 @@ pub fn app() -> void $ Ui + Workbench:
     provide_theme(palette):
         shell(bench, dark, palette)
     # Both act on the shell's root, the column just built.
-    attr("id", "shell")
+    attr("id", fn(): "shell")
     dom_on(
         "theme-change",
         fn(scheme: string) -> void $ Mutate:

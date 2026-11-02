@@ -1,4 +1,4 @@
-use dep.ui.{Command, Ui, UiEvent, button, reset_for_test, signal}
+use dep.ui.{Command, Ui, UiEvent, button, reset_for_test, signal, text}
 use pkg.{Surface, run_app}
 use std.testing.assert_equal
 
@@ -20,7 +20,8 @@ impl Surface for Host:
 
 fn app() -> void $ Ui:
     label := signal("before")
-    button("go", fn(): label.set("after"))
+    button(fn(): label.set("after")):
+        text(fn(): "go")
 
 it("run_app carries commands and events across the host trait, and stops on handler 0"):
     reset_for_test()

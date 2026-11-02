@@ -28,6 +28,11 @@ const command = (tag, fields) => ({ tag, fields });
 const create = (node, kind) => command("Create", { node, kind });
 const append = (parent, child) => command("Append", { parent, child });
 const setText = (node, text) => command("SetText", { node, text });
+// A button's label: a text node it holds.
+const labelled = (button, text) => {
+  const child = button + 1000;
+  return [create(child, "text"), append(button, child), setText(child, text)];
+};
 const set = (node, key, value) => command("SetProp", { node, key, value });
 const listen = (node, event, handler) => command("Listen", { node, event, handler });
 const num = (value) => ({ tag: "Number", fields: { value } });
@@ -264,7 +269,7 @@ test("text wraps at its box, and a row shrinks before it overflows", () => {
   assert.deepEqual(wrapText("a\nb"), ["a", "b"]);
   assert.deepEqual(rowsOf([...column(1), ...label(2, 1, "one two three")], 7, 3), ["one two", "three", ""]);
   const box = boxesOf(
-    [...rowBox(1), ...label(2, 1, "one two three"), create(3, "button"), append(1, 3), setText(3, "go")],
+    [...rowBox(1), ...label(2, 1, "one two three"), create(3, "button"), append(1, 3), ...labelled(3, "go")],
     10,
     4,
   );
@@ -399,7 +404,7 @@ test("borders: one cell whatever the width, rounded with a radius, in border_col
 });
 
 test("the controls: a bare button is bracketed, a checkbox ticks, a field shows its tail", () => {
-  assert.equal(rowsOf([...rowBox(1), create(2, "button"), append(1, 2), setText(2, "ok")])[0], "[ok]");
+  assert.equal(rowsOf([...rowBox(1), create(2, "button"), append(1, 2), ...labelled(2, "ok")])[0], "[ok]");
   assert.equal(
     rowsOf([...rowBox(1), create(2, "checkbox"), append(1, 2), set(2, "checked", flag(true)), create(3, "checkbox"), append(1, 3)])[0],
     "[x][ ]",
@@ -446,11 +451,11 @@ const form = [
   listen(3, "change", 12),
   create(4, "button"),
   append(1, 4),
-  setText(4, "go"),
+  ...labelled(4, "go"),
   listen(4, "click", 13),
   create(5, "button"),
   append(1, 5),
-  setText(5, "off"),
+  ...labelled(5, "off"),
   listen(5, "click", 14),
   set(5, "disabled", flag(true)),
   ...label(6, 1, "not listening"),
@@ -635,7 +640,7 @@ test("the mouse: a left press focuses and clicks; a field only takes the focus",
 
 test("the mouse counts scroll", async () => {
   const items = [];
-  for (let i = 0; i < 10; i += 1) items.push(create(10 + i, "button"), append(1, 10 + i), setText(10 + i, `b${i}`), listen(10 + i, "click", 10 + i));
+  for (let i = 0; i < 10; i += 1) items.push(create(10 + i, "button"), append(1, 10 + i), ...labelled(10 + i, `b${i}`), listen(10 + i, "click", 10 + i));
   const { surface, terminal } = surfaceOf([...column(1), ...items], { rows: 3, cols: 10 });
   await eventsAfter(surface, terminal, "\t".repeat(9));
   assert.deepEqual(await eventsAfter(surface, terminal, "\x1b[<0;1;1M"), [{ handler: 17, payload: "" }], "the top row shows b7");
@@ -691,7 +696,7 @@ test("a page taller than the screen scrolls to keep the focus in view", async ()
   const items = [];
   for (let i = 0; i < 20; i += 1) {
     const id = 10 + i;
-    items.push(create(id, "button"), append(1, id), setText(id, `b${i}`), listen(id, "click", id));
+    items.push(create(id, "button"), append(1, id), ...labelled(id, `b${i}`), listen(id, "click", id));
   }
   const { surface, terminal } = surfaceOf([...column(1), ...items], { screen: true, rows: 5, cols: 10 });
   const seen = () => terminal.written.at(-1);
@@ -739,4 +744,20 @@ test("a prefixed event is another renderer's: no listener, and no focus", () => 
     { tag: "Listen", fields: { node: 1, event: "dom:focus", handler: 1 } },
   ]);
   assert.equal(tree.nodes.get(1).listeners.size, 0);
+});
+
+test("a button holding only text is one label; one holding more lays out as a box", () => {
+  assert.equal(rowsOf([...rowBox(1), create(2, "button"), append(1, 2), ...labelled(2, "a"), create(3, "text"), append(2, 3), setText(3, "b")])[0], "[ab]");
+  const live = treeOf([...rowBox(1), create(2, "button"), append(1, 2), ...labelled(2, "0")]);
+  assert.equal(live.nodes.get(2).children.length, 1);
+  assert.equal(rowsOf([...rowBox(1), create(2, "button"), append(1, 2), ...labelled(2, "0"), setText(1002, "1")])[0], "[1]", "a label follows its text");
+  const fragment = [create(3, "fragment"), append(2, 3), create(4, "text"), append(3, 4), setText(4, "x")];
+  assert.equal(rowsOf([...rowBox(1), create(2, "button"), append(1, 2), ...fragment])[0], "[x]", "a fragment's text counts");
+  const boxed = rowsOf([...rowBox(1), create(2, "button"), append(1, 2), create(3, "box"), append(2, 3), create(4, "text"), append(3, 4), setText(4, "icon")]);
+  assert.equal(boxed[0], "icon", "a box inside: no brackets, its child paints");
+});
+
+test("a press on a button's label reaches the button", async () => {
+  const { surface, terminal } = surfaceOf([...rowBox(1), create(2, "button"), append(1, 2), ...labelled(2, "ok"), listen(2, "click", 7)], { rows: 3, cols: 10 });
+  assert.deepEqual(await eventsAfter(surface, terminal, "\x1b[<0;2;1M"), [{ handler: 7, payload: "" }]);
 });

@@ -282,7 +282,21 @@ pub fn run_effect[F < 'static & FnMut() -> bool $ Reactive](owner: OwnerId, mut 
         },
     )
     run_computation(id)
+    forget_if_constant(id)
     id
+
+# A computation that read no source can never run again, so it holds nothing
+# worth keeping: text that reads no signal costs no more than a plain string.
+fn forget_if_constant(id: ComputationId) -> void:
+    g := graph()
+    if !g.computations.contains_key(id) || !g.computations[id].deps.is_empty():
+        return
+    owner := g.computations[id].owner
+    drop_computation(id)
+    if g.owners.contains_key(owner):
+        match g.owners[owner].computations.index_of(id):
+            .Some(index) => _ := g.owners[owner].computations.remove_at(index)
+            .None => pass
 
 ## Empties the graph and resets its counters. For tests that assert exact
 ## ids; `ui`'s `reset_for_test` calls it.

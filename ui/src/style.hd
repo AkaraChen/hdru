@@ -5,10 +5,11 @@
 ## node" and as "only these keys".
 ##
 ## ```hd
-## use pkg.{Style, Ui, column, rgb, text}
+## use pkg.{Style, Ui, column, rgb, text, view}
 ## fn card() -> void $ Ui:
 ##     column(style=Style::empty().gap(8.0).padding(12.0).bg(rgb(255, 255, 255))):
-##         text("hello", style=Style::empty().font_size(18.0))
+##         view(style=Style::empty().font_size(18.0)):
+##             text(fn(): "hello")
 ## ```
 use pkg.protocol.{Color, PropValue, Size}
 

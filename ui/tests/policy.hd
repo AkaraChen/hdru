@@ -8,7 +8,7 @@ use pkg.{
     resource_with,
     signal,
     take_commands,
-    text_live,
+    text,
 }
 use std.convert.From
 use std.task.{Backoff, TimedOut, retry, timeout, with_timeout}
@@ -55,7 +55,7 @@ fn flaky_profile(attempts: *mut Attempts, succeed_on: usize) -> void $ Ui + Cloc
         ,
         retry(Backoff { attempts: 3 }),
     )
-    text_live:
+    text:
         describe(user.get())
 
 it("retry runs the loader again after a failure, waiting on the clock"):
@@ -95,7 +95,7 @@ fn slow_profile() -> void $ Ui + Clock:
         ,
         timeout(ms(20)),
     )
-    text_live:
+    text:
         describe(user.get())
 
 it("a loader slower than its timeout lands as Failed"):
@@ -118,7 +118,7 @@ fn composed_profile(attempts: *mut Attempts) -> void $ Ui + Clock:
         ,
         with_timeout(ms(5000), retry(Backoff { attempts: 3 })),
     )
-    text_live:
+    text:
         describe(user.get())
 
 it("policies compose: a deadline around a retry"):

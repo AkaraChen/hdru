@@ -11,7 +11,7 @@ use pkg.{
     reset_for_test,
     signal,
     take_commands,
-    text_live,
+    text,
 }
 use std.testing.assert_equal
 
@@ -40,21 +40,25 @@ fn prepend(xs: List[Todo]) -> List[Todo]:
 fn todos_view() -> void $ Ui:
     todos := signal([Todo { id: 1, title: "a" }, Todo { id: 2, title: "b" }])
     column:
-        button("rename", fn(): todos.update(rename))
+        button(fn(): todos.update(rename)):
+            text(fn(): "rename")
         button(
-            "reverse",
             fn():
                 todos.update(fn(xs): xs.reversed())
             ,
-        )
-        button("add", fn(): todos.update(add))
-        button("drop first", fn(): todos.update(drop_first))
-        button("prepend", fn(): todos.update(prepend))
+        ):
+            text(fn(): "reverse")
+        button(fn(): todos.update(add)):
+            text(fn(): "add")
+        button(fn(): todos.update(drop_first)):
+            text(fn(): "drop first")
+        button(fn(): todos.update(prepend)):
+            text(fn(): "prepend")
         for_each(
             todos.read(),
             fn(todo): todo.id,
             fn(todo):
-                text_live(fn(): todo.get().title)
+                text(fn(): todo.get().title)
             ,
         )
 
@@ -66,39 +70,39 @@ it("for_each mounts one row per item under a list node"):
     reset_for_test()
     _ := mount(todos_view)
     commands := take_commands()
-    assert_equal(commands.contains(.Create(7, "fragment")), true, reason="the list node")
-    assert_equal(commands.contains(.Append(7, 8)), true, reason="row 1 under the list")
-    assert_equal(commands.contains(.SetText(9, "a")), true, reason="row 1 text")
-    assert_equal(commands.contains(.Append(7, 10)), true, reason="row 2 under the list")
-    assert_equal(commands.contains(.SetText(11, "b")), true, reason="row 2 text")
+    assert_equal(commands.contains(.Create(12, "fragment")), true, reason="the list node")
+    assert_equal(commands.contains(.Append(12, 13)), true, reason="row 1 under the list")
+    assert_equal(commands.contains(.SetText(14, "a")), true, reason="row 1 text")
+    assert_equal(commands.contains(.Append(12, 15)), true, reason="row 2 under the list")
+    assert_equal(commands.contains(.SetText(16, "b")), true, reason="row 2 text")
 
 it("rows keep identity across updates and emit only what changed"):
     reset_for_test()
     _ := mount(todos_view)
     _ := take_commands()
-    assert_equal(click(1), [.SetText(9, "A")], reason="same id, new title: one SetText")
-    assert_equal(click(2), [.MoveBefore(7, 10, .Some(8))], reason="reverse: one move")
+    assert_equal(click(1), [.SetText(14, "A")], reason="same id, new title: one SetText")
+    assert_equal(click(2), [.MoveBefore(12, 15, .Some(13))], reason="reverse: one move")
     assert_equal(
         click(3),
         [
-            .Create(12, "fragment"),
-            .Append(7, 12),
-            .Create(13, "text"),
-            .Append(12, 13),
-            .SetText(13, "c"),
+            .Create(17, "fragment"),
+            .Append(12, 17),
+            .Create(18, "text"),
+            .Append(17, 18),
+            .SetText(18, "c"),
         ],
         reason="append: one new row, no move",
     )
-    assert_equal(click(4), [.Remove(10)], reason="drop first: one Remove")
+    assert_equal(click(4), [.Remove(15)], reason="drop first: one Remove")
     assert_equal(
         click(5),
         [
-            .Create(14, "fragment"),
-            .Append(7, 14),
-            .Create(15, "text"),
-            .Append(14, 15),
-            .SetText(15, "d"),
-            .MoveBefore(7, 14, .Some(8)),
+            .Create(19, "fragment"),
+            .Append(12, 19),
+            .Create(20, "text"),
+            .Append(19, 20),
+            .SetText(20, "d"),
+            .MoveBefore(12, 19, .Some(13)),
         ],
         reason="prepend: one new row, then one move to the front",
     )
@@ -109,12 +113,13 @@ it("an unrelated list change reruns nothing inside a retained row"):
     renders := box(Counter { runs: 0 })
     _ := mount:
         todos := signal([Todo { id: 1, title: "a" }, Todo { id: 2, title: "b" }])
-        button("rename", fn(): todos.update(rename))
+        button(fn(): todos.update(rename)):
+            text(fn(): "rename")
         for_each(
             todos.read(),
             fn(todo): todo.id,
             fn(todo):
-                text_live(
+                text(
                     fn():
                         renders.runs += 1
                         todo.get().title
@@ -124,11 +129,11 @@ it("an unrelated list change reruns nothing inside a retained row"):
         )
     _ := take_commands()
     assert_equal(renders.runs, 2, reason="one run per row at mount")
-    assert_equal(click(1), [.SetText(4, "A")], reason="only row 1 changed")
+    assert_equal(click(1), [.SetText(5, "A")], reason="only row 1 changed")
     assert_equal(renders.runs, 3, reason="row 2 kept its item, so its text did not rerun")
 
 it("two items with one key panic", expect_panic="explicit-panic"):
     reset_for_test()
     _ := mount:
         todos := signal([Todo { id: 1, title: "a" }, Todo { id: 1, title: "b" }])
-        for_each(todos.read(), fn(todo): todo.id, fn(todo): text_live(fn(): todo.get().title))
+        for_each(todos.read(), fn(todo): todo.id, fn(todo): text(fn(): todo.get().title))

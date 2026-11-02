@@ -1,4 +1,6 @@
-use pkg.{Track, batch, dispose, effect, memo, on_cleanup, root, signal, sync, untrack}
+use pkg.{Reactive, Track, batch, dispose, effect, memo, on_cleanup, root, signal, sync, untrack}
+use pkg.graph.{graph, run_effect}
+use pkg.owner.current_owner
 use std.testing.assert_equal
 
 struct Counter:
@@ -181,3 +183,13 @@ it("set_if_changed skips an equal write and runs nothing"):
         assert_equal(log, [+1, +2], reason="a different value runs it")
         count.set(+2)
         assert_equal(log, [+1, +2, +2], reason="set still writes unconditionally")
+
+it("an effect that read nothing is not kept, and one that read a signal is"):
+    _ := root:
+        before := graph().computations.len()
+        owner := current_owner()
+        _ := run_effect(owner, fn() -> bool $ Reactive: false)
+        assert_equal(graph().computations.len(), before, reason="it can never run again")
+        count := signal(+1)
+        _ := run_effect(owner, fn() -> bool $ Reactive: count.get() < 0)
+        assert_equal(graph().computations.len(), before + 1, reason="it follows the signal")

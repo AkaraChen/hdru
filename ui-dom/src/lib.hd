@@ -3,4 +3,4 @@
 ## attributes, classes, the DOM's own events and multi-line fields.
 pub use pkg.surface.{Surface}
 pub use pkg.app.{run_app}
-pub use pkg.dom.{DomStyle, attr, attr_live, dom_on, textarea}
+pub use pkg.dom.{DomStyle, attr, dom_on, textarea}

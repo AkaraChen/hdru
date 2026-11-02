@@ -16,14 +16,7 @@ library has the same shape:
 | 2 Renderer protocol | host config | `createRenderer` table | the `Command` stream, the `Renderer` trait and the loop on it | `ui`; each renderer package adapts its `@host` trait to `Renderer` |
 | 3 Vocabulary | `div` vs `View` | `solid-js/web` | node kinds, events and property keys, typed by `Style` | `ui` for the portable words; a renderer package for its own, with its prefix |
 
-**What goes where.** Ask what a thing depends on:
-
-- Nothing about nodes: `reactive`.
-- The protocol, and a meaning every renderer can give it: `ui`. Its rules come from that meaning, not from any
-  platform: an `input` holds a value, so it has no children on any renderer.
-- One platform: that renderer's package, as a `dom:` key, kind or event reached through words such as `attr`,
-  `dom_class`, `dom_on` and `textarea`. So `ui` matches no HTML standard; `ui-dom` maps `ui` onto it.
-- One program: the app, as the playground's `Workbench` is.
+What goes in which layer, and how to add a component, is in [`layering.md`](layering.md).
 
 **Layer 2 carries no vocabulary.** Kinds, event names and property keys are data, so
 adding a property touches `Style` and the renderers that want it, never the host trait.
@@ -64,7 +57,7 @@ A host answers with `UiEvent { handler, payload }`. Handler 0 ends the loop.
 - **Namespaces.** A property key, node kind or event without a prefix is portable. One with
   a renderer prefix belongs to that renderer and is ignored by the others: `dom:class`,
   `dom:attr:aria-label`, `dom:textarea`, `dom:focus`. This replaces a raw command. `ui` emits
-  none of them itself: it offers `prop`, `prop_live`, `Style.host_prop` and `text_field`, and a
+  none of them itself: it offers `prop`, `Style.host_prop`, `on` and `text_field`, and a
   renderer package builds its words on those, so non-portable code shows in its imports.
 - **Numbers are `f32` logical pixels**, and each renderer applies its own scale.
 
@@ -80,7 +73,7 @@ grid, absolute positioning, transforms, animation, shadows, pseudo-states.
 | --- | --- | --- | --- |
 | `box` | `div`, `display: flex`, column | a flex column | every box is a flex container, column by default; the builder is `view` |
 | `text` | `span` | wrapped text | holds text only |
-| `button` | `button` | centered label, `[label]` with no border or background | emits `click`, takes `SetText` |
+| `button` | `button` | centered label, `[label]` with no border or background, when it holds only text; else a box | a container that emits `click`; its text is a `text` child |
 | `input` | `input type=text` | a field with a cursor | `value` property |
 | `checkbox` | `input type=checkbox` | `[x]` / `[ ]` | `checked` property |
 | `fragment` | `div`, `display: contents` | no box at all | groups without layout; `show` and `for_each` render into one |
@@ -134,8 +127,8 @@ Edges stay four keys rather than one value: a provider reads each by name, and f
 | `checked` | Flag | `input.checked` | the checkbox's state |
 | `disabled` | Flag | `disabled` | dim, takes no focus |
 
-**`color` and `font_weight` inherit on both renderers.** `text_live` takes no style, so
-live text is styled by a wrapping `view` and depends on it.
+**`color` and `font_weight` inherit on both renderers.** `text` takes no style, so its block
+can be trailing; text is styled by its container and depends on this.
 
 **`Fill` differs by renderer.** The terminal grows on the main-axis key and stretches on
 the cross-axis key. The DOM applies its one CSS shorthand to either key, so `width: Fill`
@@ -152,7 +145,8 @@ table, so field order, lowering order and diff order are the same.
 column(style=Style::empty().gap(8.0).padding(12.0).bg(theme.surface)):
     style_live:
         Style::empty().opacity(if dim.get(): 0.5 else: 1.0)
-    text("hello", style=Style::empty().color(theme.on_surface))
+    view(style=Style::empty().color(theme.on_surface)):
+        text(fn(): "hello")
 ```
 
 - `Style::empty()` is a static method because a parameter named `style` hides a function
@@ -166,7 +160,7 @@ column(style=Style::empty().gap(8.0).padding(12.0).bg(theme.surface)):
   equal style. Its first run compares with an empty style, so give a key a static or a live
   value, not both, or `Unset` can remove the static one.
 - `column` and `row` are `view` with `direction` set, always emitted.
-- `ui-dom`'s `DomStyle` adds a `dom_class` chain method to `Style`, and its `attr` / `attr_live` set attributes.
+- `ui-dom`'s `DomStyle` adds a `dom_class` chain method to `Style`, and its `attr` / `attr` set attributes.
   Importing them is what makes a component DOM-only.
 
 ## Theme instead of a cascade
@@ -180,7 +174,8 @@ fn card() -> void $ Ui + Theme:
     column(style=Style::empty().bg(theme.peek().surface).padding(12.0)):
         style_live:
             Style::empty().bg(theme.get().surface)
-        text("hello", style=Style::empty().color(theme.peek().on_surface))
+        view(style=Style::empty().color(theme.peek().on_surface)):
+            text(fn(): "hello")
 ```
 
 `provide_theme(palette_signal, body)` installs it, and `Palette::light()` and `dark()` have the

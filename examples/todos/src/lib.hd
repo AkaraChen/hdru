@@ -19,7 +19,6 @@ use dep.ui.{
     signal,
     style_live,
     text,
-    text_live,
     view,
 }
 
@@ -55,25 +54,25 @@ fn todo_row(todos: Signal[List[Todo]], todo: ReadSignal[Todo]) -> void $ Ui:
         style_live:
             Style::empty().opacity(if todo.get().done: 0.5 else: 1.0)
         view(style=Style::empty().grow(1.0)):
-            text_live:
+            text:
                 if todo.get().done:
                     "[x] ${todo.get().title}"
                 else:
                     "[ ] ${todo.get().title}"
         button(
-            "toggle",
             fn():
                 todos.update(fn(xs): toggle(todo.peek().id, xs))
             ,
             style=quiet(),
-        )
+        ):
+            text(fn(): "toggle")
         button(
-            "remove",
             fn():
                 todos.update(fn(xs): without(todo.peek().id, xs))
             ,
             style=quiet(),
-        )
+        ):
+            text(fn(): "remove")
 
 fn list() -> void $ Ui + Theme:
     theme := $.use(Theme).palette()
@@ -93,7 +92,7 @@ fn list() -> void $ Ui + Theme:
         style_live:
             q := theme.get()
             Style::empty().bg(q.surface).color(q.on_surface).border_color(q.line)
-        text_live:
+        text:
             "${remaining.get()} left"
         for_each(todos.read(), fn(todo): todo.id, fn(todo): todo_row(todos, todo))
         row(style=Style::empty().gap(8.0)):
@@ -105,21 +104,22 @@ fn list() -> void $ Ui + Theme:
                 ,
             )
             button(
-                "add",
                 fn():
                     add(todos, next_id, draft, draft.peek())
                 ,
                 style=quiet().bg(p.accent).color(p.on_accent).border_color(p.accent),
-            )
+            ):
+                text(fn(): "add")
             button(
-                "reverse",
                 fn():
                     todos.update(fn(xs): xs.reversed())
                 ,
                 style=quiet(),
-            )
+            ):
+                text(fn(): "reverse")
         show(fn(): remaining.get() == 0):
-            text("all done", style=Style::empty().color(p.muted))
+            view(style=Style::empty().color(p.muted)):
+                text(fn(): "all done")
 
 ## The app, for either renderer: its entries are `main.hd` and `tui.hd`.
 pub fn app() -> void $ Ui:

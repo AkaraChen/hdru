@@ -14,7 +14,7 @@ use pkg.{
     reset_for_test,
     signal,
     take_commands,
-    text_live,
+    text,
 }
 use std.testing.assert_equal
 
@@ -32,10 +32,12 @@ fn form() -> void $ Ui:
                 draft.set("")
             ,
         )
-        text_live:
+        text:
             "draft: ${draft.get()}"
-        button("clear", fn(): draft.set(""))
-        button("fill", fn(): draft.set("filled"))
+        button(fn(): draft.set("")):
+            text(fn(): "clear")
+        button(fn(): draft.set("filled")):
+            text(fn(): "fill")
 
 it("input mounts with its value and listens for input"):
     reset_for_test()
@@ -57,12 +59,16 @@ it("input mounts with its value and listens for input"):
             .SetText(3, "draft: hello"),
             .Create(4, "button"),
             .Append(1, 4),
-            .SetText(4, "clear"),
             .Listen(4, "click", 3),
-            .Create(5, "button"),
-            .Append(1, 5),
-            .SetText(5, "fill"),
-            .Listen(5, "click", 4),
+            .Create(5, "text"),
+            .Append(4, 5),
+            .SetText(5, "clear"),
+            .Create(6, "button"),
+            .Append(1, 6),
+            .Listen(6, "click", 4),
+            .Create(7, "text"),
+            .Append(6, 7),
+            .SetText(7, "fill"),
         ],
         reason="the mount command list",
     )
@@ -100,9 +106,10 @@ fn agreement() -> void $ Ui:
     agreed := signal(false)
     column:
         checkbox(agreed)
-        text_live:
+        text:
             if agreed.get(): "agreed" else: "not yet"
-        button("reset", fn(): agreed.set(false))
+        button(fn(): agreed.set(false)):
+            text(fn(): "reset")
 
 it("checkbox follows change events and writes from elsewhere"):
     reset_for_test()

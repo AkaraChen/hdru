@@ -19,9 +19,10 @@ fn counter() -> void $ Ui:
         count.get() * 2
 
     column(style=Style::empty().gap(8.0).padding(12.0)):
-        text_live:
+        text:
             "${count.get()} x 2 = ${doubled.get()}"
-        button("+1", fn(): count.update(fn(n): n + 1))
+        button(fn(): count.update(fn(n): n + 1)):
+            text(fn(): "+1")
 ```
 
 | React / Solid | Here |
@@ -30,7 +31,8 @@ fn counter() -> void $ Ui:
 | `useMemo` / `createMemo` | `memo:` |
 | `useEffect` / `createEffect` | `effect:` |
 | `<div style={...}>` | `column(style=...):` |
-| `{count()}` | `text_live:` |
+| `{count()}` | `text:` |
+| `<button onClick={...}>` | `button(on_click):` |
 | `{list.map(...)}` / `<For>` | `for_each` |
 | `{cond && ...}` / `<Show>` | `show` |
 
@@ -56,8 +58,9 @@ updates. Here it does not compile.
 ```hd
 fn bad() -> void $ Ui:
     count := signal(+0)
+    n := count.get()
     column:
-        text("${count.get()}")
+        text(fn(): "$n")
 ```
 
 ```
@@ -65,8 +68,8 @@ error: missing-requirement: this needs `$ Track`, which the enclosing function's
 row does not name; `$ Ui` is `$ Owner + Parent`
 ```
 
-The reason is one signature. Reading needs `Track`, and only `text_live:`, `memo:` and `effect:`
-provide it:
+The reason is one signature. Reading needs `Track`, and only `text`, `memo` and `effect` provide
+it:
 
 ```hd
 pub fn get(self) -> T $ Track:
@@ -84,13 +87,14 @@ fn card() -> void $ Ui + Theme:
         style_live:
             p := theme.get()
             Style::empty().bg(p.surface).color(p.on_surface)
-        text("hello")
+        text(fn(): "hello")
 
 fn app() -> void $ Ui:
     palette := signal(Palette::light())
     provide_theme(palette):
         card()
-        button("dark", fn(): palette.set(Palette::dark()))
+        button(fn(): palette.set(Palette::dark())):
+            text(fn(): "dark")
 ```
 
 Without `provide_theme`, this is `missing-requirement: this needs $ Theme`. Style is a typed value
@@ -132,9 +136,9 @@ fn todos() -> void $ Ui:
     draft := signal("")
     column:
         input(draft)
-        for_each(items.read(), fn(todo): todo.id, fn(todo): text_live(fn(): todo.get().title))
+        for_each(items.read(), fn(todo): todo.id, fn(todo): text(fn(): todo.get().title))
         show(fn(): items.get().is_empty()):
-            text("all done")
+            text(fn(): "all done")
 ```
 
 - `for_each` is keyed. A row whose key stays gets its new item through its own signal, so an unrelated
@@ -163,12 +167,13 @@ fn profile() -> void $ Ui + Clock:
         ,
     )
     column:
-        text_live:
+        text:
             match user.get():
                 .Loading => "loading…"
                 .Ready(name) => name
                 .Failed(why) => "failed: $why"
-        button("next", fn(): id.update(fn(n): n + 1))
+        button(fn(): id.update(fn(n): n + 1)):
+            text(fn(): "next")
 ```
 
 `fetch_user!` says in its row that it needs a clock, so a test swaps in a fake without mocking a module.
@@ -225,10 +230,11 @@ or Ctrl-C quits.
 
   ```hd
   let api: *mut dyn Api = $.use(Api)
-  button("save", fn():
+  button(fn():
       $.with(Api=api):
           save_flow(name.peek())
-  )
+  ):
+      text(fn(): "save")
   ```
 - **Untested at scale.** The examples are about 270 lines, and performance has not been measured.
 - **Signals are never freed,** including the one `for_each` makes per row, so a list that keeps mounting new
@@ -237,8 +243,8 @@ or Ctrl-C quits.
   UI in a program.
 - **A native renderer is blocked.** Host providers run only on JavaScript for now
   ([hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191)), so the terminal renderer runs on Node.
-- **A compiler bug rejects some valid blocks.** A `text_live:` that reads no signal fails until
-  [hd-lang#1194](https://github.com/HerringtonDarkholme/hd-lang/issues/1194) is fixed. Write `text_live(fn(): "x")`.
+- **A compiler bug rejects some valid blocks.** A `text:` that reads no signal fails until
+  [hd-lang#1194](https://github.com/HerringtonDarkholme/hd-lang/issues/1194) is fixed. Write `text(fn(): "x")`.
 
 ## Try it
 
@@ -258,7 +264,7 @@ cd examples/todos && hd run todos-tui
 | --- | --- |
 | every package's tests, from the root | `hd test` |
 | one package | `hd test -p reactive` (or `ui`, `ui-dom`, `ui-tui`) |
-| provider tests | `node --test ui-dom/providers/dom.test.mjs ui-tui/providers/tui.test.mjs` |
+| provider tests and the layering rules | `node --test ui-dom/providers/dom.test.mjs ui-tui/providers/tui.test.mjs layering.test.mjs` |
 | the examples in a terminal | `hd run counter-tui`, `hd run todos-tui`, `hd run fetcher-tui`, each in its `examples/` folder |
 | a terminal app driven by keys, printing plain frames | `cd examples/counter && printf '\t\rq' \| hd run counter-tui` |
 | an example under Node, DOM provider, scripted clicks | `cd examples/counter && UI_CLICKS=2,2,1 hd run counter --engine node` |
@@ -287,5 +293,6 @@ An app depends on `ui` and a renderer, and consents to the renderer's host trait
 Read next:
 
 - [`docs/design.md`](docs/design.md): how it works and why
+- [`docs/layering.md`](docs/layering.md): what belongs in which package, and how to add a component
 - [`docs/rendering.md`](docs/rendering.md): the protocol, the vocabulary, and writing a renderer
 - [`docs/packages.md`](docs/packages.md): the workspace and manifests

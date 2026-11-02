@@ -22,10 +22,10 @@ Every public signature follows these. They come from probing the compiler, and
 they explain most of what looks odd in the API.
 
 1. **A closure passed to an `Fn` or `FnMut` bound takes the bound's row.**
-   `button("x", fn(): pass)` works (`fn.trait.bound-closure`). A trailing block
+   `button(fn(): pass): ...` works (`fn.trait.bound-closure`). A trailing block
    should too, but does not yet
    ([hd-lang#1194](https://github.com/HerringtonDarkholme/hd-lang/issues/1194)):
-   an `effect:` that reads only through `untrack`, or a `text_live:` that reads no
+   an `effect:` that reads only through `untrack`, or a `text:` that reads no
    signal, fails with `unsatisfied-trait-bound`, so it is written as an explicit
    closure, `effect(fn(): ...)`. Each bound lists only the row the library
    re-installs at run time; a callback that needs another key follows "Keys in
@@ -36,12 +36,12 @@ they explain most of what looks odd in the API.
    erases into a concrete closure of its own.
 3. **An `Fn` bound takes only an inline closure or a function name.** A closure
    first bound to a variable implements only `FnMut`
-   (`fn.trait.read-only.values`). `memo`, `text_live`, `show` and `for_each` take
+   (`fn.trait.read-only.values`). `memo`, `text`, `show` and `for_each` take
    their callbacks inline; `button` and `effect` use `FnMut` and accept either.
 4. **Row-polymorphic builders thread keys only through synchronous callbacks.**
    `fn column[$R](children: fn() -> void $ Ui + R) -> void $ Ui + R` passes any
    extra key of the caller through nested blocks. A callback the library retains
-   and runs later (`text_live`, `show`'s branch, `for_each`'s render, handlers,
+   and runs later (`text`, `show`'s branch, `for_each`'s render, handlers,
    loaders) runs under `Track + Mutate` or less, cannot carry `R`, and captures
    providers lexically. `reactive/tests/rows.hd` is the smallest example.
 5. **No provider method may run user code.** `ref.excl.alias.call-loan` makes a
@@ -138,10 +138,11 @@ fn panel() -> void $ Ui + Api + Log:
     let api: *mut dyn Api = $.use(Api)
     let log: *mut dyn Log = $.use(Log)
     name := signal("")
-    button("save", fn():
+    button(fn():
         $.with(Api=api, Log=log):
             save_flow(name.peek())
-    )
+    ):
+        text(fn(): "save")
 ```
 
 `save_flow` can be tested alone with fakes. A key missing from the component's row is
@@ -185,12 +186,12 @@ round of effects.
 **Builders return `void`.** A function's final expression must match its result
 type, so if builders returned a `NodeId`, every component ending in `text(...)`
 would be a `type-mismatch`. Instead the runtime records the node of the builder
-that finished last. `last_node()` returns it, and `on`, `prop`, `prop_live` and
-`ui-dom`'s `attr` and `attr_live` apply to it.
+that finished last. `last_node()` returns it, and `on`, `prop` and
+`ui-dom`'s `attr` apply to it.
 
-**`text_live` takes no style.** Its block is usually positional, and a positional
-argument cannot skip a default. Live text is styled by a wrapping `view`, which is
-why both renderers inherit `color` and `font_weight` (`rendering.md`).
+**`text` takes no style.** Its block is usually trailing, and a trailing block must be
+the last parameter. Text is styled by a wrapping `view`, which is why both renderers
+inherit `color` and `font_weight` (`rendering.md`).
 
 ### `show`
 

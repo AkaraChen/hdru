@@ -10,10 +10,9 @@ use pkg.protocol.PropValue
 use pkg.runtime.{built_last, create_node, drop_handler, emit, mark_built, register_handler}
 use pkg.style.{Direction, Style, diff, lower}
 
-struct Last:
-    text: string
-    ## True until the first run has emitted.
-    first: bool
+struct Last[T]:
+    ## What was last written; none until the first run.
+    value: T?
 
 struct Shown:
     child: OwnerId?
@@ -55,7 +54,7 @@ pub fn view[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) 
 ##     count := signal(+1)
 ##     column:  # error: missing-requirement
 ##         n := count.get()
-##         text("$n")
+##         text(fn(): "$n")
 ## ```
 ##
 ## `column(style=Style::empty().gap(8.0).padding(12.0)):` styles it; name
@@ -83,7 +82,7 @@ pub fn row[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -
 ##     column:
 ##         style_live:
 ##             Style::empty().opacity(if dim.get(): 0.5 else: 1.0)
-##         text("hello")
+##         text(fn(): "hello")
 ## ```
 pub fn style_live[F < 'static & Fn() -> Style $ Track](compute: F) -> void $ Ui:
     owner := $.use(Owner).owner()
@@ -97,54 +96,48 @@ pub fn style_live[F < 'static & Fn() -> Style $ Track](compute: F) -> void $ Ui:
         false
     _ := run_effect(owner, run)
 
-## Static text.
-pub fn text(content: string, style: Style = Style::empty()) -> void $ Ui:
-    node := styled_node("text", style)
-    emit(.SetText(node, content))
-    mark_built(node)
-
-## Text that follows the signals it reads. The block runs now and again
-## whenever one of them changes; equal text emits nothing. It takes no
-## `style`, because the block is usually passed positionally and a
-## positional argument cannot skip a default; wrap it in a styled `view`
-## instead.
-pub fn text_live[F < 'static & Fn() -> string $ Track](compute: F) -> void $ Ui:
+## Text. The block runs now and again whenever a signal it reads changes, and
+## equal text emits nothing, so text that reads no signal is only written once.
+## It takes no `style`, so that the block can be trailing; style text through
+## its container, as both renderers inherit `color` and `font_weight`.
+pub fn text[F < 'static & Fn() -> string $ Track](content: F) -> void $ Ui:
     owner := $.use(Owner).owner()
     parent := $.use(Parent).parent()
     node := create_node("text")
     emit(.Append(parent, node))
-    follow(owner, compute, fn(next: string) -> void: emit(.SetText(node, next)))
+    follow(owner, content, fn(next: string) -> void: emit(.SetText(node, next)))
     mark_built(node)
 
 # Runs `compute` now and whenever a signal it read changes, and calls
 # `write` with its value the first time and each time it differs.
-fn follow[F < 'static & Fn() -> string $ Track, W < 'static & Fn(string) -> void](
+fn follow[T < 'static & Eq, F < 'static & Fn() -> T $ Track, W < 'static & Fn(T) -> void](
     owner: OwnerId,
     compute: F,
     write: W,
 ) -> void:
-    last := box(Last { text: "", first: true })
+    last := box(Last::[T] { value: .None })
     run := fn() -> bool $ Reactive:
         next := compute()
-        if last.first || next != last.text:
-            last.first = false
-            last.text = next
+        if last.value != .Some(next):
+            last.value = .Some(next)
             write(next)
         false
     _ := run_effect(owner, run)
 
-## A button. The handler may write signals but not read them tracked; use
-## `peek` or `update`. `style` comes after the handler and is named:
-## `button("save", save, style=primary)`.
-pub fn button[F < 'static & FnMut() -> void $ Mutate](
-    label: string,
+## A button: a container that sends `click` to `on_click`. The handler may write
+## signals but not read them tracked; use `peek` or `update`. Its block runs
+## now, under the caller's row. `style` is named:
+## `button(save, style=primary): text(fn(): "save")`.
+pub fn button[$R, F < 'static & FnMut() -> void $ Mutate](
     mut on_click: F,
     style: Style = Style::empty(),
-) -> void $ Ui:
+    children: fn() -> void $ Ui + R,
+) -> void $ Ui + R:
     owner := $.use(Owner).owner()
     node := styled_node("button", style)
-    emit(.SetText(node, label))
     listen(owner, node, "click", fn(payload: string) -> void $ Mutate: on_click())
+    $.with(Parent=box(Scope { owner: owner, parent: node })):
+        children()
     mark_built(node)
 
 ## Registers `handler` for `event` on `node` and drops it with `owner`.
@@ -190,23 +183,18 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
     _ := run_effect(owner, run)
     mark_built(fragment)
 
-## The node the builder that finished last made: a `text` or `button`, or
-## a `column` or `row` once its block has run. For the few cases that need
+## The node the builder that finished last made: a `text`, or
+## a `column`, `row` or `button` once its block has run. For the few cases that need
 ## to address a node later; builders return `void` so a component may end
 ## with one.
 pub fn last_node() -> NodeId $ Ui:
     built_last()
 
-## Sets one property on `last_node()` by key: how a renderer package adds
-## words the portable vocabulary lacks, as `ui-dom`'s `attr` does. An app sets
-## properties through `Style`.
-pub fn prop(key: string, value: PropValue) -> void $ Ui:
-    emit(.SetProp(last_node(), key, value))
-
-## A text property of `last_node()` that follows the signals `compute` reads,
-## as `text_live` does for text: one `SetProp` per change and none for an
-## equal value.
-pub fn prop_live[F < 'static & Fn() -> string $ Track](key: string, compute: F) -> void $ Ui:
+## A property of `last_node()` by key, following the signals `compute` reads:
+## one `SetProp` per change and none for an equal value. How a renderer package
+## adds words the portable vocabulary lacks, as `ui-dom`'s `attr` does; an app
+## sets properties through `Style`.
+pub fn prop[F < 'static & Fn() -> PropValue $ Track](key: string, compute: F) -> void $ Ui:
     owner := $.use(Owner).owner()
     node := last_node()
-    follow(owner, compute, fn(next: string) -> void: emit(.SetProp(node, key, .Text(next))))
+    follow(owner, compute, fn(next: PropValue) -> void: emit(.SetProp(node, key, next)))

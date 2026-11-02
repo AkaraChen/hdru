@@ -13,7 +13,7 @@ use pkg.{
     show,
     signal,
     take_commands,
-    text_live,
+    text,
 }
 use std.testing.assert_equal
 
@@ -30,15 +30,16 @@ fn profile() -> void $ Ui:
     id := signal(+1)
     user := resource(fn(): id.get(), lookup)
     column:
-        text_live:
+        text:
             describe(user.get())
         button(
-            "next",
             fn():
                 id.update(fn(n): n + 1)
             ,
-        )
-        button("bad", fn(): id.set(-1))
+        ):
+            text(fn(): "next")
+        button(fn(): id.set(-1)):
+            text(fn(): "bad")
 
 ## Runs every job registered so far, and any they register, then returns
 ## what they emitted: what a worker pool would do, on the test task.
@@ -80,11 +81,11 @@ fn gated() -> void $ Ui:
     open := signal(true)
     column:
         button(
-            "toggle",
             fn():
                 open.update(fn(v): !v)
             ,
-        )
+        ):
+            text(fn(): "toggle")
         show(fn(): open.get()):
             profile()
 
@@ -92,5 +93,5 @@ it("disposing the owner drops a queued job"):
     reset_for_test()
     _ := mount(gated)
     _ := take_commands()
-    assert_equal(click(1), [.Clear(3)], reason="hidden")
+    assert_equal(click(1), [.Clear(4)], reason="hidden")
     assert_equal(run_pending!(), [], reason="the branch's job never ran")

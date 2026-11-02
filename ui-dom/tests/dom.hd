@@ -1,24 +1,24 @@
-use dep.ui.{Command, PropValue, Style, Ui, UiEvent, column, dispatch, input, mount, reset_for_test, signal, take_commands, text}
-use pkg.{DomStyle, attr, attr_live, dom_on, textarea}
+use dep.ui.{Command, PropValue, Style, Ui, UiEvent, column, dispatch, input, mount, reset_for_test, signal, take_commands, text, view}
+use pkg.{DomStyle, attr, dom_on, textarea}
 use std.testing.assert_equal
 
 it("dom_class lowers to the dom:class key"):
     reset_for_test()
-    _ := mount(fn() -> void $ Ui: text("hi", style=Style::empty().font_size(18.0).dom_class("lead")))
+    _ := mount(fn() -> void $ Ui: view(style=Style::empty().font_size(18.0).dom_class("lead"), children=fn() -> void $ Ui: pass))
     commands := take_commands()
     assert_equal(commands.contains(.SetProp(1, "dom:class", .Text("lead"))), true, reason="the class")
     assert_equal(commands.contains(.SetProp(1, "font_size", .Number(18.0))), true, reason="beside a portable key")
 
-it("attr and attr_live lower to dom:attr keys on the last node"):
+it("attr and attr lower to dom:attr keys on the last node"):
     reset_for_test()
     level := signal("low")
     _ := mount(
         fn() -> void $ Ui:
             column:
-                text("first")
-                attr("title", "first")
-                attr_live("data-level", fn(): level.get())
-            attr("id", "main")
+                text(fn(): "first")
+                attr("title", fn(): "first")
+                attr("data-level", fn(): level.get())
+            attr("id", fn(): "main")
         ,
     )
     commands := take_commands()

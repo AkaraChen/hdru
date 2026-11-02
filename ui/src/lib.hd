@@ -38,6 +38,6 @@ pub use pkg.theme.{Palette, SignalTheme, Theme, provide_theme}
 pub use pkg.runtime.{dispatch, last_writes, mount, reset_for_test, take_commands}
 pub use pkg.renderer.{Recorder, Renderer, run_on, scripted}
 pub use pkg.resource.{Resource, resource, resource_with}
-pub use pkg.builders.{button, column, last_node, prop, prop_live, row, show, style_live, text, text_live, view}
+pub use pkg.builders.{button, column, last_node, prop, row, show, style_live, text, view}
 pub use pkg.collections.{for_each}
 pub use pkg.inputs.{checkbox, input, on, text_field}

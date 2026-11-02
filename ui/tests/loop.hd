@@ -20,7 +20,7 @@ use pkg.{
     row,
     signal,
     sync,
-    text_live,
+    text,
 }
 use std.testing.assert_equal
 use std.time.{Clock, ManualClock, Timestamp, ms}
@@ -28,21 +28,21 @@ use std.time.{Clock, ManualClock, Timestamp, ms}
 fn counter() -> void $ Ui:
     count := signal(+0)
     column:
-        text_live:
+        text:
             "Count: ${count.get()}"
         row:
             button(
-                "-",
                 fn():
                     count.update(fn(n): n - 1)
                 ,
-            )
+            ):
+                text(fn(): "-")
             button(
-                "+",
                 fn():
                     count.update(fn(n): n + 1)
                 ,
-            )
+            ):
+                text(fn(): "+")
 
 it("run_on drives the counter through a scripted renderer and stops on handler 0"):
     reset_for_test()
@@ -50,12 +50,12 @@ it("run_on drives the counter through a scripted renderer and stops on handler 0
     $.with(Renderer=recorder):
         run_on!(counter)
     log := recorder.log
-    assert_equal(log.len(), 20, reason="17 mount commands and 3 updates")
+    assert_equal(log.len(), 24, reason="21 mount commands and 3 updates")
     assert_equal(log.get(0).copied(), .Some(Command.Create(1, "box")), reason="mount first")
-    assert_equal(log.get(17).copied(), .Some(Command.SetText(2, "Count: 1")), reason="first plus")
-    assert_equal(log.get(18).copied(), .Some(Command.SetText(2, "Count: 2")), reason="second plus")
+    assert_equal(log.get(21).copied(), .Some(Command.SetText(2, "Count: 1")), reason="first plus")
+    assert_equal(log.get(22).copied(), .Some(Command.SetText(2, "Count: 2")), reason="second plus")
     assert_equal(
-        log.get(19).copied(),
+        log.get(23).copied(),
         .Some(Command.SetText(2, "Count: 1")),
         reason="minus; the unknown handler 7 emitted nothing",
     )
@@ -77,7 +77,7 @@ fn slow_profile() -> void $ Ui + Clock:
             .Ok("slow user $key")
         ,
     )
-    text_live:
+    text:
         describe(user.get())
 
 it("a loader that suspends lands through the workers of run_on"):
@@ -105,10 +105,12 @@ fn form() -> void $ Ui:
                 draft.set("")
             ,
         )
-        text_live:
+        text:
             "draft: ${draft.get()}"
-        button("clear", fn(): draft.set(""))
-        button("fill", fn(): draft.set("filled"))
+        button(fn(): draft.set("")):
+            text(fn(): "clear")
+        button(fn(): draft.set("filled")):
+            text(fn(): "fill")
 
 it("run_on carries payloads from the renderer to the handler"):
     reset_for_test()
@@ -125,16 +127,16 @@ it("run_on carries payloads from the renderer to the handler"):
     $.with(Renderer=recorder):
         run_on!(form)
     log := recorder.log
-    assert_equal(log.len(), 24, reason="20 mount commands, then 1, 1 and 2")
-    assert_equal(log.get(20).copied(), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
-    assert_equal(log.get(21).copied(), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
-    assert_equal(log.get(22).copied(), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
+    assert_equal(log.len(), 28, reason="24 mount commands, then 1, 1 and 2")
+    assert_equal(log.get(24).copied(), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
+    assert_equal(log.get(25).copied(), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
+    assert_equal(log.get(26).copied(), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
 
 fn agree() -> void $ Ui:
     accepted := signal(false)
     column:
         checkbox(accepted)
-        text_live:
+        text:
             if accepted.get(): "accepted" else: "not yet"
 
 it("run_on carries a checkbox's change payload, as the provider sends it"):
@@ -173,7 +175,7 @@ fn chain() -> void $ Ui + Clock:
                     next.set(key + 1)
             _ => pass
     )
-    text_live:
+    text:
         match rows.get():
             .Ready(key) => "at $key"
             _ => "loading"
@@ -197,7 +199,7 @@ fn crowd() -> void $ Ui + Clock:
                     .Ok(key)
                 ,
             )
-            text_live:
+            text:
                 match load.get():
                     .Ready(key) => "done $key"
                     _ => "loading"

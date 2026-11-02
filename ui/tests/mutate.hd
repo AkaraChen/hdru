@@ -11,7 +11,7 @@ use pkg.{
     root,
     signal,
     sync,
-    text_live,
+    text,
 }
 use std.testing.assert_equal
 
@@ -40,17 +40,18 @@ it("dispatch records the sources a handler wrote, not those its effects wrote"):
         sync:
             doubled.set(count.get() * 2)
         column:
-            text_live:
+            text:
                 "Count: ${count.get()} / ${doubled.get()}"
             button(
-                "both",
                 fn():
                     other.update(fn(n): n + 1)
                     count.update(fn(n): n + 1)
                     other.update(fn(n): n + 1)
                 ,
-            )
-            button("nothing", fn(): count.set_if_changed(count.peek()))
+            ):
+                text(fn(): "both")
+            button(fn(): count.set_if_changed(count.peek())):
+                text(fn(): "nothing")
     dispatch(UiEvent { handler: 1, payload: "" })
     let expected: List[SourceId] = [ids[2], ids[1]]
     assert_equal(last_writes(), expected, reason="other, then count; doubled was the sync's write")
