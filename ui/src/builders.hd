@@ -1,13 +1,13 @@
 ## Node builders. Each reads `$.use(Owner)` and `$.use(Parent)` into locals
 ## and never captures them; a container runs its block under a fresh
-## `Parent` that names the new node. Each takes `style: Style =
+## `Parent` and `Target` that name the new node. Each takes `style: Style =
 ## Style::empty()` and emits one `SetProp` per set field after `Create`,
 ## then attaches the node.
 use std.function.{Fn, FnMut}
 use dep.reactive.{Mutate, NoTrack, Owner, OwnerId, Reactive, Track, cleanup_on, dispose, new_owner, run_effect}
-use pkg.keys.{NodeId, Parent, Scope, Ui}
+use pkg.keys.{NodeId, Parent, Scope, Target, Ui}
 use pkg.protocol.PropValue
-use pkg.runtime.{built_last, create_node, drop_handler, emit, mark_built, register_handler}
+use pkg.runtime.{after_apply, create_node, drop_handler, emit, register_handler}
 use pkg.style.{Direction, Style, diff, lower}
 
 struct Last[T]:
@@ -36,17 +36,17 @@ pub fn styled_node(kind: string, style: Style) -> NodeId $ Ui:
 ## A box: a flex container, a column unless `style` says otherwise, whose
 ## block runs now under the caller's row. `column` and `row` are views
 ## with the direction set.
-pub fn view[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+pub fn view[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + Target + R) -> void $ Ui + R:
     container("box", style, children)
 
 ## A node of `kind` holding what its block builds, for a renderer package's own
-## kinds of container, as `ui-dom`'s `link`. `last_node()` names it afterwards.
-pub fn container[$R](kind: string, style: Style, children: fn() -> void $ Ui + R) -> void $ Ui + R:
+## kinds of container, as `ui-dom`'s `link`. Its block can address it.
+pub fn container[$R](kind: string, style: Style, children: fn() -> void $ Ui + Target + R) -> void $ Ui + R:
     owner := $.use(Owner).owner()
     node := styled_node(kind, style)
-    $.with(Parent=box(Scope { owner: owner, parent: node })):
+    scope := box(Scope { owner: owner, parent: node })
+    $.with(Parent=scope, Target=scope):
         children()
-    mark_built(node)
 
 ## A vertical box. The block runs now, under the caller's row: any key the
 ## component names besides `Ui`, say `Theme`, reaches every block nested
@@ -64,15 +64,15 @@ pub fn container[$R](kind: string, style: Style, children: fn() -> void $ Ui + R
 ##
 ## `column(style=Style::empty().gap(8.0).padding(12.0)):` styles it; name
 ## the argument, since the block is the last parameter.
-pub fn column[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+pub fn column[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + Target + R) -> void $ Ui + R:
     view(Style { ...style, direction: .Some(.Column) }, children)
 
 ## A horizontal box; its block runs under the caller's row, as `column`'s
 ## does.
-pub fn row[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
+pub fn row[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + Target + R) -> void $ Ui + R:
     view(Style { ...style, direction: .Some(.Row) }, children)
 
-## Restyles the enclosing container: inside a `column:`, `row:` or `view:`
+## Restyles the block's node: inside a `column:`, `row:` or `view:`
 ## block, the block of `style_live` returns a `Style` that follows the
 ## signals it reads. Each run emits a `SetProp` only for the keys that
 ## changed since the last run, and `Unset` for a key that went unset; an
@@ -89,9 +89,9 @@ pub fn row[$R](style: Style = Style::empty(), children: fn() -> void $ Ui + R) -
 ##             Style::empty().opacity(if dim.get(): 0.5 else: 1.0)
 ##         text(fn(): "hello")
 ## ```
-pub fn style_live[F < 'static & Fn() -> Style $ Track](compute: F) -> void $ Ui:
+pub fn style_live[F < 'static & Fn() -> Style $ Track](compute: F) -> void $ Owner + Target:
     owner := $.use(Owner).owner()
-    node := $.use(Parent).parent()
+    node := $.use(Target).target()
     last := box(LastStyle { style: Style::empty() })
     run := fn() -> bool $ Reactive:
         next := compute()
@@ -111,7 +111,6 @@ pub fn text[F < 'static & Fn() -> string $ Track](content: F) -> void $ Ui:
     node := create_node("text")
     emit(.Append(parent, node))
     follow(owner, content, fn(next: string) -> void: emit(.SetText(node, next)))
-    mark_built(node)
 
 # Runs `compute` now and whenever a signal it read changes, and calls
 # `write` with its value the first time and each time it differs.
@@ -136,14 +135,14 @@ fn follow[T < 'static & Eq, F < 'static & Fn() -> T $ Track, W < 'static & Fn(T)
 pub fn button[$R, F < 'static & FnMut() -> void $ Mutate](
     mut on_click: F,
     style: Style = Style::empty(),
-    children: fn() -> void $ Ui + R,
+    children: fn() -> void $ Ui + Target + R,
 ) -> void $ Ui + R:
     owner := $.use(Owner).owner()
     node := styled_node("button", style)
     listen(owner, node, "click", fn(payload: string) -> void $ Mutate: on_click())
-    $.with(Parent=box(Scope { owner: owner, parent: node })):
+    scope := box(Scope { owner: owner, parent: node })
+    $.with(Parent=scope, Target=scope):
         children()
-    mark_built(node)
 
 ## Registers `handler` for `event` on `node` and drops it with `owner`.
 pub fn listen[F < 'static & FnMut(string) -> void $ Mutate](
@@ -186,20 +185,30 @@ pub fn show[C < 'static & Fn() -> bool $ Track, F < 'static & Fn() -> void $ Ui]
                     shown.child = .Some(child)
         false
     _ := run_effect(owner, run)
-    mark_built(fragment)
 
-## The node the builder that finished last made: a `text`, or
-## a `column`, `row` or `button` once its block has run. For the few cases that need
-## to address a node later; builders return `void` so a component may end
-## with one.
-pub fn last_node() -> NodeId $ Ui:
-    built_last()
-
-## A property of `last_node()` by key, following the signals `compute` reads:
+## A property of the block's node by key, following the signals `compute` reads:
 ## one `SetProp` per change and none for an equal value. How a renderer package
 ## adds words the portable vocabulary lacks, as `ui-dom`'s `attr` does; an app
 ## sets properties through `Style`.
-pub fn prop[F < 'static & Fn() -> PropValue $ Track](key: string, compute: F) -> void $ Ui:
+pub fn prop[F < 'static & Fn() -> PropValue $ Track](key: string, compute: F) -> void $ Owner + Target:
     owner := $.use(Owner).owner()
-    node := last_node()
+    node := $.use(Target).target()
     follow(owner, compute, fn(next: PropValue) -> void: emit(.SetProp(node, key, next)))
+
+struct Alive:
+    yes: bool
+
+## Calls `callback` with the block's node once the host has applied it, so that
+## host code handed the id can find it: the ref. A renderer's nodes are opaque to
+## `ui`, and what an id means is between the app and its host. It runs at most once,
+## and not at all if the node's owner is disposed first.
+pub fn on_ready[F < 'static & FnMut(NodeId) -> void $ Mutate](mut callback: F) -> void $ Owner + Target:
+    node := $.use(Target).target()
+    alive := box(Alive { yes: true })
+    cleanup_on($.use(Owner).owner(), fn() -> void: alive.yes = false)
+    after_apply(
+        fn() -> void $ Mutate:
+            if alive.yes:
+                callback(node)
+        ,
+    )

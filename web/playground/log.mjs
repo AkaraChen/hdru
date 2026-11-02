@@ -2,7 +2,7 @@
 // newest line unless the reader scrolled up, and its heads are colored.
 const STUCK_WITHIN_PX = 24;
 
-function attach(pane) {
+export function attachLog(pane) {
   const layer = pane.querySelector("span");
   let stuck = true;
   pane.addEventListener("scroll", () => {
@@ -28,18 +28,4 @@ function attach(pane) {
     paint();
     if (stuck || !layer.textContent) pane.scrollTop = pane.scrollHeight;
   }).observe(layer, { childList: true, characterData: true, subtree: true });
-}
-
-export function watchLog(root) {
-  const tryAttach = () => {
-    const pane = root.querySelector("#commands");
-    if (!pane?.querySelector("span")) return false;
-    attach(pane);
-    return true;
-  };
-  if (tryAttach()) return;
-  const watcher = new MutationObserver(() => {
-    if (tryAttach()) watcher.disconnect();
-  });
-  watcher.observe(root, { childList: true, subtree: true });
 }

@@ -5,7 +5,8 @@
 // rows that changed as ANSI. Key presses become the protocol's events: Tab
 // and Shift-Tab move the focus, Enter and Space click, typing edits a field,
 // Space toggles a checkbox, a left press focuses and clicks, and `q` (outside
-// a field) or Ctrl-C sends handler 0.
+// a field) or Ctrl-C sends handler 0. A focused node's `take_keys` take any of
+// these but Ctrl-C from the renderer, and they reach its `key` listeners instead.
 //
 // With stdout not a terminal it prints each changed frame as plain text, and
 // stdin may be a pipe, whose end also sends handler 0:
@@ -13,7 +14,7 @@
 //
 // This is the terminal's half of rendering.md: its kinds and keys as
 // far as a cell grid can follow them. Unknown kinds are boxes, unknown keys
-// are dropped, and a key with a renderer prefix ("dom:...") is another
+// are dropped, and a key or event with a renderer prefix ("dom:...") is another
 // renderer's. docs/rendering.md says where it departs.
 //
 // Commands arrive as { tag, fields }; see ui-dom/providers/dom.mjs. Each part
@@ -1225,6 +1226,14 @@ export function createTuiSurface(terminal) {
   const press = (key) => {
     if (key === "Ctrl-C") {
       stop();
+      return;
+    }
+    // A node can take a key from the renderer, except the one that always quits.
+    placeFocus();
+    const chord = key === "Shift-Tab" ? "Shift+Tab" : key;
+    if (focus && word(focus, "take_keys")?.split("\n").includes(chord)) {
+      fire(focus, "key", chord);
+      render();
       return;
     }
     if (key === "Tab" || key === "Shift-Tab") {

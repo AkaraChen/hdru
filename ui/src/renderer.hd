@@ -7,7 +7,7 @@ use std.task.{Receiver, Sender, channel, join, map_join}
 use dep.reactive.OwnerId
 use pkg.keys.Ui
 use pkg.protocol.{Command, UiEvent}
-use pkg.runtime.{dispatch, mount, run_job, take_commands, take_new_jobs}
+use pkg.runtime.{dispatch, mount, run_job, run_ready, take_commands, take_new_jobs}
 
 ## What a renderer does. `apply!` consumes one batch of commands and
 ## `next_event!` waits for the next user event; a handler of 0 ends the loop.
@@ -34,9 +34,11 @@ struct Pool:
 
 # Sends the queued commands, then hands over the jobs registered since.
 fn send!(pool: *mut Pool) -> void $ Renderer:
-    commands := take_commands()
-    if !commands.is_empty():
+    let mut commands = take_commands()
+    while !commands.is_empty():
         $.use(Renderer).apply!(commands)
+        run_ready()
+        commands = take_commands()
     for id in take_new_jobs():
         pool.jobs.push(id)
         if !pool.closed && pool.idle > 0:

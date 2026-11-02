@@ -2,11 +2,12 @@
 ## user's edit arrives as an event payload and is written into the signal;
 ## a write from elsewhere is sent to the control as a `SetProp`, except the
 ## value the control already shows, so a keystroke is never echoed back.
-use std.function.FnMut
+use std.function.{Fn, FnMut}
 use dep.reactive.{Mutate, Owner, OwnerId, Reactive, Signal, Track, run_effect}
-use pkg.keys.{NodeId, Parent, Ui}
-use pkg.runtime.{built_last, emit, mark_built}
-use pkg.builders.{listen, styled_node}
+use pkg.keys.{Decorate, NodeId, Parent, Scope, Target, Ui}
+use pkg.runtime.emit
+use pkg.builders.{listen, prop, styled_node}
+use pkg.protocol.PropValue
 use pkg.style.Style
 
 # What the control shows now: the last value sent to it or typed into it.
@@ -16,13 +17,26 @@ struct Shown:
 ## A text field bound to `value`. Typing writes the field's text into
 ## `value` on each `input` event; writing `value` elsewhere, say clearing
 ## it after a submit, updates the field.
-pub fn input(value: Signal[string], style: Style = Style::empty()) -> void $ Ui:
-    text_field("input", value, style)
+pub fn input(
+    value: Signal[string],
+    style: Style = Style::empty(),
+    decorate: fn() -> void $ Decorate = undecorated,
+) -> void $ Ui:
+    text_field("input", value, style, decorate)
 
 ## A field of `kind` bound to `value`, for a renderer package's own kinds of
 ## field, as `ui-dom`'s `textarea`. The kind takes the `value` property and sends
-## `input` events.
-pub fn text_field(kind: string, value: Signal[string], style: Style) -> void $ Ui:
+## `input` events. Its block can address it, and has no `Parent`, so a field cannot
+## be given children:
+##
+## ```hd
+## use pkg.{Ui, input, signal, text}
+## fn field() -> void $ Ui:
+##     draft := signal("")
+##     input(draft):
+##         text(fn(): "no")  # error: type-mismatch
+## ```
+pub fn text_field(kind: string, value: Signal[string], style: Style, decorate: fn() -> void $ Decorate) -> void $ Ui:
     owner := $.use(Owner).owner()
     initial := value.peek()
     node := styled_node(kind, style)
@@ -44,13 +58,17 @@ pub fn text_field(kind: string, value: Signal[string], style: Style) -> void $ U
             emit(.SetProp(node, "value", .Text(next)))
         false
     follow_effect(owner, run)
-    mark_built(node)
+    decorate_node(owner, node, decorate)
 
 ## A checkbox bound to `checked`, over the `change` event, whose payload
 ## the host sends as `"true"` or `"false"`. Its kind is "checkbox" and its
 ## state the `checked` flag, two additions to the vocabulary of
 ## `rendering.md`.
-pub fn checkbox(checked: Signal[bool], style: Style = Style::empty()) -> void $ Ui:
+pub fn checkbox(
+    checked: Signal[bool],
+    style: Style = Style::empty(),
+    decorate: fn() -> void $ Decorate = undecorated,
+) -> void $ Ui:
     owner := $.use(Owner).owner()
     initial := checked.peek()
     node := styled_node("checkbox", style)
@@ -72,10 +90,11 @@ pub fn checkbox(checked: Signal[bool], style: Style = Style::empty()) -> void $ 
             emit(.SetProp(node, "checked", .Flag(next == "true")))
         false
     follow_effect(owner, run)
-    mark_built(node)
+    decorate_node(owner, node, decorate)
 
-## Calls `handler` with the event's payload whenever `event` fires on
-## `last_node()`. The portable events are `click`, `input`, `change`, `key` and
+## Calls `handler` with the event's payload whenever `event` fires on the
+## block's node. There must be one: a component body has none, so this is an
+## error there and in a `show` branch, rather than acting on some other node. The portable events are `click`, `input`, `change`, `key` and
 ## `enter` (`rendering.md`); a renderer prefix names that renderer's own. Enter
 ## in a field sends `enter`, with the field's text as the payload:
 ##
@@ -83,11 +102,27 @@ pub fn checkbox(checked: Signal[bool], style: Style = Style::empty()) -> void $ 
 ## use pkg.{Mutate, Ui, input, on, signal}
 ## fn search() -> void $ Ui:
 ##     query := signal("")
-##     input(query)
-##     on("enter", fn(text: string) -> void $ Mutate: query.set(""))
+##     input(query):
+##         on("enter", fn(text: string) -> void $ Mutate: query.set(""))
 ## ```
-pub fn on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Ui:
-    listen($.use(Owner).owner(), built_last(), event, fn(payload: string) -> void $ Mutate: handler(payload))
+pub fn on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Owner + Target:
+    listen($.use(Owner).owner(), $.use(Target).target(), event, fn(payload: string) -> void $ Mutate: handler(payload))
+
+## Takes the keys `keys` names away from the renderer, while its focus is on the
+## block's node: what the renderer would do with them does not happen, and they
+## reach its `key` listeners, as Tab does in an editor. This is declared beforehand
+## because a handler runs too late to stop a default. It follows the signals `keys`
+## reads, so a node can give a key back. Names are `KeyboardEvent.key`'s, with
+## `Shift+` before a named key and `Ctrl+`, `Alt+` or `Meta+` before any.
+pub fn take_keys[F < 'static & Fn() -> List[string] $ Track](keys: F) -> void $ Owner + Target:
+    prop("take_keys", fn() -> PropValue $ Track: .Text(keys().join("\n")))
+
+fn undecorated() -> void $ Decorate:
+    pass
+
+fn decorate_node(owner: OwnerId, node: NodeId, decorate: fn() -> void $ Decorate) -> void $ Owner:
+    $.with(Target=box(Scope { owner: owner, parent: node })):
+        decorate()
 
 # Runs `run` as an effect of `owner`, now and after each change.
 fn follow_effect[F < 'static & FnMut() -> bool $ Reactive](owner: OwnerId, mut run: F) -> void:

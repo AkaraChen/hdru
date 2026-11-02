@@ -5,7 +5,7 @@ use std.format.{Debug, debug}
 use std.hash.Hash
 use dep.reactive.{Mutate, NoTrack, Owner, OwnerId, ReadSignal, Reactive, Signal, Track, dispose, new_owner, run_effect, signal}
 use pkg.keys.{NodeId, Parent, Scope, Ui}
-use pkg.runtime.{create_node, emit, mark_built}
+use pkg.runtime.{create_node, emit}
 
 struct Row[T < 'static]:
     owner: OwnerId
@@ -85,4 +85,3 @@ pub fn for_each[
         state.order = current
         false
     _ := run_effect(owner, run)
-    mark_built(fragment)

@@ -3,7 +3,8 @@
 // node holds the same text, colored here with hd-lang's `classify` through the
 // CSS Custom Highlight API, so coloring adds no DOM nodes. `::highlight()` can
 // only set colors and decoration, which keeps both layers' glyphs the same
-// width. Tab is here because an hdru event cannot prevent a browser default.
+// width. The shell decides when Tab indents; applying the edit is here, because it
+// needs the selection and the browser's undo history.
 import { classify } from "../../../hd-lang/website/src/highlight.ts";
 
 const INDENT = 4;
@@ -117,9 +118,9 @@ function applyEdit(input, edit) {
   input.setSelectionRange(edit.selStart, edit.selEnd);
 }
 
-function attach(back, input, state) {
+function attach(back, gutterBox, input, state) {
   const layer = back.querySelector("span");
-  const gutter = back.parentElement.querySelector(".editor-gutter span");
+  const gutter = gutterBox.querySelector("span");
   const cache = new Map();
   const paint = () => {
     if (typeof Highlight === "undefined") return;
@@ -152,7 +153,7 @@ function attach(back, input, state) {
   // range differ from a layer without them.
   const scroll = () => {
     layer.style.transform = `translate(${-input.scrollLeft}px, ${-input.scrollTop}px)`;
-    if (gutter) gutter.style.transform = `translateY(${-input.scrollTop}px)`;
+    gutter.style.transform = `translateY(${-input.scrollTop}px)`;
   };
   new MutationObserver(() => {
     paint();
@@ -163,38 +164,23 @@ function attach(back, input, state) {
   state.input = input;
   paint();
 
-  // Escape then Tab leaves the editor, so the keyboard is never trapped in it.
-  let leaving = false;
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      leaving = true;
-      return;
-    }
-    if (event.key === "Tab" && !leaving && !event.isComposing) {
-      event.preventDefault();
-      applyEdit(input, indentEdit(input.value, input.selectionStart, input.selectionEnd, event.shiftKey));
-    }
-    if (!["Shift", "Alt", "Control", "Meta"].includes(event.key)) leaving = false;
-  });
 }
 
-// The editor under `root`, attached once hdru has built it.
-export function createEditor(root) {
+// The editor, attached once the shell has bound its three nodes.
+export function createEditor() {
   const state = { source: null, problems: [], paint: () => {}, input: null };
-  const tryAttach = () => {
-    const back = root.querySelector("#editor-back");
-    const input = root.querySelector("textarea");
-    if (!back?.querySelector("span") || !input) return false;
-    attach(back, input, state);
-    return true;
-  };
-  if (!tryAttach()) {
-    const watcher = new MutationObserver(() => {
-      if (tryAttach()) watcher.disconnect();
-    });
-    watcher.observe(root, { childList: true, subtree: true });
-  }
+  const parts = {};
   return {
+    bind(role, element) {
+      parts[role] = element;
+      if (parts["editor-back"] && parts["editor-gutter"] && parts["editor-input"]) {
+        attach(parts["editor-back"], parts["editor-gutter"], parts["editor-input"], state);
+      }
+    },
+    indent(outdent) {
+      const { input } = state;
+      if (input) applyEdit(input, indentEdit(input.value, input.selectionStart, input.selectionEnd, outdent));
+    },
     showProblems(source, problems) {
       state.source = source;
       state.problems = problems;

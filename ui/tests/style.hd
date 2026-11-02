@@ -13,7 +13,6 @@ use pkg.{
     column,
     diff,
     dispatch,
-    last_node,
     lower,
     mount,
     prop,
@@ -120,7 +119,7 @@ it("diff gives changed keys, Unset for a key that went unset, nothing for equal"
     )
     assert_equal(diff(b, b), [], reason="equal styles")
 
-it("style_live restyles the enclosing container by key"):
+it("style_live restyles the block's node by key"):
     reset_for_test()
     _ := mount:
         level := signal(+0)
@@ -145,21 +144,20 @@ it("style_live restyles the enclosing container by key"):
     assert_equal(click(2), [], reason="an equal style emits nothing")
     assert_equal(click(1), [.SetProp(1, "opacity", .Unset)], reason="a key that went unset")
 
-it("prop sets a key on the last node, following what it reads"):
+it("prop sets a key on the block's node, following what it reads"):
     reset_for_test()
     _ := mount:
         level := signal(+1)
         column:
-            text(fn(): "a")
-            prop("x:title", fn(): PropValue.Text("first"))
-        prop("x:id", fn(): PropValue.Text("main"))
-        text(fn(): "meter")
-        prop(
-            "x:level",
-            fn():
-                PropValue.Text(if level.get() > 2: "high" else: "low")
-            ,
-        )
+            prop("x:id", fn(): PropValue.Text("main"))
+            view:
+                prop("x:title", fn(): PropValue.Text("first"))
+                prop(
+                    "x:level",
+                    fn():
+                        PropValue.Text(if level.get() > 2: "high" else: "low")
+                    ,
+                )
         button(
             fn():
                 level.update(fn(n): n + 1)
@@ -167,11 +165,11 @@ it("prop sets a key on the last node, following what it reads"):
         ):
             text(fn(): "up")
     commands := take_commands()
-    assert_equal(commands.contains(.SetProp(2, "x:title", .Text("first"))), true, reason="the text inside")
-    assert_equal(commands.contains(.SetProp(1, "x:id", .Text("main"))), true, reason="the column, after its block")
-    assert_equal(commands.contains(.SetProp(3, "x:level", .Text("low"))), true, reason="the first value")
+    assert_equal(commands.contains(.SetProp(1, "x:id", .Text("main"))), true, reason="the column")
+    assert_equal(commands.contains(.SetProp(2, "x:title", .Text("first"))), true, reason="the view inside")
+    assert_equal(commands.contains(.SetProp(2, "x:level", .Text("low"))), true, reason="the first value")
     assert_equal(click(1), [], reason="2 is still low: no command")
-    assert_equal(click(1), [.SetProp(3, "x:level", .Text("high"))], reason="3 is high: one SetProp")
+    assert_equal(click(1), [.SetProp(2, "x:level", .Text("high"))], reason="3 is high: one SetProp")
 
 it("host props lower after the portable keys, replace by key, and diff by key"):
     a := Style::empty().gap(1.0).host_prop("x:a", .Text("1")).host_prop("x:b", .Text("2"))
@@ -182,15 +180,6 @@ it("host props lower after the portable keys, replace by key, and diff by key"):
     assert_equal(diff(a, dropped), [("x:a", PropValue.Unset)], reason="one gone")
     assert_equal(diff(a, a), [], reason="equal")
     assert_equal(lower(Style::empty().host_prop("x:a", .Text("1")).merge(Style::empty().host_prop("x:a", .Text("2")))), [("x:a", PropValue.Text("2"))], reason="merge")
-
-it("last_node names the container after its block has run"):
-    reset_for_test()
-    seen := box([0])
-    _ := mount:
-        column:
-            text(fn(): "a")
-        seen.push(last_node())
-    assert_equal(seen[1], 1, reason="the column")
 
 fn card() -> void $ Ui + Theme:
     theme := $.use(Theme).palette()

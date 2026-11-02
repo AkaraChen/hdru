@@ -4,7 +4,7 @@
 // `node --test ui-dom/providers/dom.test.mjs`.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createDomSurface, createScriptedSurface, cssFor } from "./dom.mjs";
+import { chordOf, createDomSurface, createScriptedSurface, cssFor } from "./dom.mjs";
 
 // Just enough of the DOM for createDomSurface.
 class FakeElement {
@@ -259,6 +259,43 @@ test("the DOM tree routes portable and dom: events, and drops an unknown one", (
     // A portable event's payload is the target's value, whatever its detail.
     listened[0][1]({ detail: 1, target: { value: "typed" } });
     assert.deepEqual(surface.next_event(), { handler: 1, payload: "typed" });
+  } finally {
+    delete globalThis.document;
+  }
+});
+
+test("a key's name carries its modifiers, and a shift only before a named key", () => {
+  assert.equal(chordOf({ key: "a" }), "a");
+  assert.equal(chordOf({ key: "A", shiftKey: true }), "A");
+  assert.equal(chordOf({ key: "Tab" }), "Tab");
+  assert.equal(chordOf({ key: "Tab", shiftKey: true }), "Shift+Tab");
+  assert.equal(chordOf({ key: "Enter", metaKey: true }), "Meta+Enter");
+  assert.equal(chordOf({ key: "s", ctrlKey: true }), "Ctrl+s");
+  assert.equal(chordOf({ key: "Shift", shiftKey: true }), "Shift");
+});
+
+test("take_keys prevents only the keys it names, can change, and leaves a composition alone", () => {
+  globalThis.document = { createElement: (tag) => new FakeElement(tag) };
+  const nodes = new Map();
+  try {
+    const surface = createDomSurface(new FakeElement("main"), nodes, quiet, quiet);
+    surface.apply([command("Create", { node: 1, kind: "box" })]);
+    const listeners = [];
+    nodes.get(1).addEventListener = (name, listener) => listeners.push([name, listener]);
+    surface.apply([command("SetProp", { node: 1, key: "take_keys", value: word("Tab\nShift+Tab") })]);
+    const keydown = (fields) => {
+      let prevented = false;
+      listeners[0][1]({ ...fields, preventDefault: () => (prevented = true) });
+      return prevented;
+    };
+    assert.equal(listeners.length, 1);
+    assert.equal(keydown({ key: "Tab" }), true);
+    assert.equal(keydown({ key: "Tab", shiftKey: true }), true);
+    assert.equal(keydown({ key: "a" }), false);
+    assert.equal(keydown({ key: "Tab", isComposing: true }), false);
+    surface.apply([command("SetProp", { node: 1, key: "take_keys", value: word("") })]);
+    assert.equal(listeners.length, 1, "no second listener");
+    assert.equal(keydown({ key: "Tab" }), false, "given back");
   } finally {
     delete globalThis.document;
   }

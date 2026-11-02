@@ -9,21 +9,21 @@ it("dom_class lowers to the dom:class key"):
     assert_equal(commands.contains(.SetProp(1, "dom:class", .Text("lead"))), true, reason="the class")
     assert_equal(commands.contains(.SetProp(1, "font_size", .Number(18.0))), true, reason="beside a portable key")
 
-it("attr and attr lower to dom:attr keys on the last node"):
+it("attr lowers to dom:attr keys on the block's node, following what it reads"):
     reset_for_test()
     level := signal("low")
     _ := mount(
         fn() -> void $ Ui:
             column:
-                text(fn(): "first")
-                attr("title", fn(): "first")
-                attr("data-level", fn(): level.get())
-            attr("id", fn(): "main")
+                attr("id", fn(): "main")
+                view:
+                    attr("title", fn(): "first")
+                    attr("data-level", fn(): level.get())
         ,
     )
     commands := take_commands()
-    assert_equal(commands.contains(.SetProp(2, "dom:attr:title", .Text("first"))), true, reason="the text, from inside")
-    assert_equal(commands.contains(.SetProp(1, "dom:attr:id", .Text("main"))), true, reason="the column, after its block")
+    assert_equal(commands.contains(.SetProp(1, "dom:attr:id", .Text("main"))), true, reason="the column")
+    assert_equal(commands.contains(.SetProp(2, "dom:attr:title", .Text("first"))), true, reason="the view inside")
     assert_equal(commands.contains(.SetProp(2, "dom:attr:data-level", .Text("low"))), true, reason="the first value")
 
 it("textarea is a field of the dom:textarea kind, bound as input is"):
@@ -43,8 +43,8 @@ it("dom_on listens under the dom: prefix, and input under a portable name"):
     draft := signal("")
     _ := mount(
         fn() -> void $ Ui:
-            input(draft)
-            dom_on("focus", fn(payload: string): seen.set(payload))
+            input(draft):
+                dom_on("focus", fn(payload: string): seen.set(payload))
         ,
     )
     commands := take_commands()
@@ -53,13 +53,13 @@ it("dom_on listens under the dom: prefix, and input under a portable name"):
     dispatch(UiEvent { handler: 2, payload: "x" })
     assert_equal(seen.peek(), "x", reason="the handler ran")
 
-it("link is a container of the dom:a kind, and attr then labels it"):
+it("link is a container of the dom:a kind, and its block can label it"):
     reset_for_test()
     _ := mount(
         fn() -> void $ Ui:
             link("https://example.com"):
+                attr("aria-label", fn(): "the site")
                 text(fn(): "site")
-            attr("aria-label", fn(): "the site")
         ,
     )
     commands := take_commands()
@@ -68,3 +68,14 @@ it("link is a container of the dom:a kind, and attr then labels it"):
     assert_equal(commands.contains(.SetProp(1, "dom:attr:href", .Text("https://example.com"))), true, reason="the target")
     assert_equal(commands.contains(.SetProp(1, "dom:attr:rel", .Text("noopener noreferrer"))), true, reason="no opener")
     assert_equal(commands.contains(.SetProp(1, "dom:attr:aria-label", .Text("the site"))), true, reason="labelled")
+
+it("textarea's block addresses the field"):
+    reset_for_test()
+    draft := signal("")
+    _ := mount(
+        fn() -> void $ Ui:
+            textarea(draft):
+                attr("spellcheck", fn(): "false")
+        ,
+    )
+    assert_equal(take_commands().contains(.SetProp(1, "dom:attr:spellcheck", .Text("false"))), true, reason="the field")

@@ -96,8 +96,11 @@ export function commandLog(commands) {
   return lines.join("\n");
 }
 
-// `editor` is { showProblems(source, problems), reveal(problem) }.
-export function createWorkbench({ examples, compilerUrl, runnerUrl, previewUrl, editor }) {
+// `editor` is { showProblems(source, problems), reveal(problem), indent(outdent) }.
+// `nodes` is the DOM renderer's table of elements by node id, and `onBound` hears
+// which element plays each role (`Workbench.bind`).
+export function createWorkbench({ examples, compilerUrl, runnerUrl, previewUrl, editor, nodes, onBound }) {
+  const bound = new Map();
   let current = null;
   const system = matchMedia("(prefers-color-scheme: dark)");
   // Storage can be blocked; the choice then lasts as long as the page.
@@ -123,7 +126,7 @@ export function createWorkbench({ examples, compilerUrl, runnerUrl, previewUrl, 
   system.addEventListener("change", () => {
     if (choice) return;
     showScheme();
-    document.getElementById("shell")?.dispatchEvent(new CustomEvent("theme-change", { detail: scheme() }));
+    bound.get("shell")?.dispatchEvent(new CustomEvent("theme-change", { detail: scheme() }));
   });
 
   // The compiler, with its answers matched to requests by id.
@@ -156,7 +159,7 @@ export function createWorkbench({ examples, compilerUrl, runnerUrl, previewUrl, 
       : { ok: answer.ok, problems: problemsOf(answer.diagnostics) };
 
   const log = (text) => {
-    document.getElementById("commands")?.dispatchEvent(new CustomEvent("preview-log", { detail: text }));
+    bound.get("commands")?.dispatchEvent(new CustomEvent("preview-log", { detail: text }));
   };
 
   // The run in the preview.
@@ -174,7 +177,7 @@ export function createWorkbench({ examples, compilerUrl, runnerUrl, previewUrl, 
     frame.setAttribute("title", "preview");
     frame.style.cssText = "border:0;width:100%;height:100%;display:block";
     frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>*,*::before,*::after{box-sizing:border-box}:root{color-scheme:${scheme()};background:light-dark(#fff,#0f151c);color:light-dark(#18222b,#dbe6e8)}body{margin:0;padding:16px;font:14px/1.45 system-ui,sans-serif}button,input,textarea{font:inherit;color:inherit}input:not([type=checkbox]),textarea{background:transparent}</style></head><body><div id="app"></div><script src="${previewUrl}"></` + `script></body></html>`;
-    document.getElementById("preview").replaceChildren(frame);
+    bound.get("preview").replaceChildren(frame);
 
     const worker = new Worker(runnerUrl, { type: "module" });
     let ready = false;
@@ -245,6 +248,14 @@ export function createWorkbench({ examples, compilerUrl, runnerUrl, previewUrl, 
     },
     reveal(place) {
       editor.reveal(place);
+    },
+    bind(role, node) {
+      const element = nodes.get(node);
+      bound.set(role, element);
+      onBound(role, element);
+    },
+    indent(outdent) {
+      editor.indent(outdent);
     },
   };
 }

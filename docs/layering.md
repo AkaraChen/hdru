@@ -46,10 +46,10 @@ ignore it: `dom:class`, `dom:attr:title`, `dom:textarea`, `dom:a`, `dom:focus`.
 
 | Extension point | What it does | Built on it, in `ui-dom` |
 | --- | --- | --- |
-| `prop(key, compute)` | a property of `last_node()` that follows signals | `attr` |
+| `prop(key, compute)` | a property of the block's node that follows signals | `attr` |
 | `Style.host_prop(key, value)` | a key beyond the portable ones, in a `Style` | `DomStyle.dom_class` |
-| `on(event, handler)` | a handler for an event on `last_node()` | `dom_on` |
-| `text_field(kind, value, style)` | a field bound to a signal | `textarea` |
+| `on(event, handler)` | a handler for an event on the block's node | `dom_on` |
+| `text_field(kind, value, style, decorate)` | a field bound to a signal | `textarea` |
 | `container(kind, style, children)` | a node holding what its block builds | `link` |
 
 The point is the import. Using `attr` means writing `use dep.ui_dom.attr`, so a component that only works in a browser
@@ -106,9 +106,29 @@ step with the control. Neither has children.
 
 **The order of parameters:** what it needs, then a named `style: Style = Style::empty()`, then the block.
 
-**`void` is returned, and `last_node()` addresses the result.** `on`, `prop` and `attr` act on the node built last: a
-container once its block has run, or from inside a block, on the child built last. An empty container has no last
-child, so write those calls after the block.
+**What acts on a node goes in that node's block.** `on`, `prop`, `attr`, `style_live`, `take_keys` and `on_ready` need
+`Target`, which only a builder's block provides. A builder returns `void`, since a component may end with one, so there
+is no handle to pass around: where the call is written says which node it means.
+
+```hd
+column:
+    attr("id", fn(): "main")      # the column
+    input(draft):
+        on("enter", submit)       # the input
+```
+
+Every builder that makes a node takes a block, except `text`, whose block is its content. Give a new one a block too.
+A container's block runs under `Ui + Target`. A leaf's runs under `Decorate`, which is `Owner + Target`, so a leaf
+cannot be given children. A component body and a `show` or `for_each` block have no `Target`, so calling `on` there does
+not compile, and a helper that acts on a node says so in its row: `$ Owner + Target`.
+
+**A ref is an id given to the host, once it exists.** `on_ready(fn(node): ...)` runs after the host has applied the node,
+with its opaque `NodeId`. What an id means is between the app and its host: the playground passes it to `Workbench.bind`,
+and looks it up in the table the DOM renderer fills. Do not coordinate through DOM ids.
+
+**A default is stopped by declaring it, not in a handler.** A handler runs after the event has crossed into wasm, too
+late to prevent anything. `take_keys(fn(): ["Tab"])` says beforehand which keys a node takes from its renderer, on every
+renderer, and follows signals, so a node can give a key back.
 
 **Read keys where they are valid.** A block given to a container runs now, under the caller's row. A closure the
 library keeps and reruns has only `Track`, so anything from `$.use` is read first, into a local:
@@ -125,6 +145,7 @@ fn title() -> void $ Ui + Provided[string]:
 | --- | --- |
 | reading a signal needs `Track`, writing needs `Mutate`, a missing provider | the compiler |
 | `ui` offers no DOM words | the compiler: `unknown-import`, `unknown-method` |
+| acting on a node needs a block that has one; a leaf takes no children | the compiler: the `Target` key and the `Decorate` row |
 | imports go one way; `ui` and `reactive` have no host and no prefixed names | `layering.test.mjs` |
 | every kind in `ui` exists in both renderers | `layering.test.mjs` |
 | the terminal paints what the real program sends | `ui-tui/providers/tui.test.mjs`, against a fixture |
@@ -139,5 +160,6 @@ Places where the rule is not met yet, so that nobody takes them as precedent.
 - **`ui-dom` words still run in a terminal.** Importing `ui-dom` is allowed in a program with a terminal entry, where
   `textarea` draws as a plain box and cannot be edited. A requirement key such as `$ Dom` could make this a compile
   error, at the cost of one more thing in every DOM component's row.
+- **Only keys can be taken.** No event but a key can stop its default yet. A DOM-only way would belong in `dom_on`.
 - **A button can hold a button.** Nothing stops it, though what focus and clicks mean there is undefined on every
   renderer.

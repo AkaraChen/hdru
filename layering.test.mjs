@@ -63,7 +63,7 @@ test("a portable app's library imports only ui", () => {
 test("every kind in ui exists in both renderers", () => {
   const kinds = new Set();
   for (const file of sources("ui/src")) {
-    for (const m of code(read(file)).matchAll(/(?:create_node|styled_node|text_field)\("([a-z]+)"/g)) kinds.add(m[1]);
+    for (const m of code(read(file)).matchAll(/(?:create_node|styled_node|text_field|container)\("([a-z]+)"/g)) kinds.add(m[1]);
   }
   assert.ok(kinds.has("button") && kinds.has("text"), "the scan found the kinds");
   const dom = read("ui-dom/providers/dom.mjs");

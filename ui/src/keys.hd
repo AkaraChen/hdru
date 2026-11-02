@@ -18,8 +18,18 @@ pub type Ui = $ Owner + Parent
 pub trait Parent:
     fn parent(&self) -> NodeId
 
-## The provider of both keys of `Ui`: one owner and one parent node,
-## installed as `Owner=scope, Parent=scope`.
+## Installed while a builder's block runs: the node that block belongs to, which
+## `on`, `prop`, `style_live` and `on_ready` act on. A component body has none,
+## and a leaf's block has this without `Parent`, so what acts on a node always says
+## which node, and a leaf cannot be given children: both are compile errors.
+pub trait Target:
+    fn target(&self) -> NodeId
+
+## The row of a block that can only address its node: a leaf's.
+pub type Decorate = $ Owner + Target
+
+## The provider of the keys of `Ui` and of `Target`: one owner and one node,
+## installed as `Owner=scope, Parent=scope` or `Target=scope`.
 pub struct Scope:
     pub owner: OwnerId
     pub parent: NodeId
@@ -30,4 +40,8 @@ impl Owner for Scope:
 
 impl Parent for Scope:
     fn parent(&self) -> NodeId:
+        self.parent
+
+impl Target for Scope:
+    fn target(&self) -> NodeId:
         self.parent

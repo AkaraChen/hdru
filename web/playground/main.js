@@ -5,14 +5,20 @@ import * as generated from "../../playground/build/debug/playground.host.mjs";
 import { createDomSurface } from "../../ui-dom/providers/dom.mjs";
 import { createWorkbench } from "../../playground/providers/workbench.mjs";
 import { createEditor } from "./editor.mjs";
-import { watchLog } from "./log.mjs";
+import { attachLog } from "./log.mjs";
 import sources from "./gen/examples.json";
 
 const here = (path) => new URL(path, import.meta.url).href;
-const editor = createEditor(document.getElementById("app"));
-watchLog(document.getElementById("app"));
+const editor = createEditor();
+// The element table the renderer fills, which is how a node id finds its element.
+const nodes = new Map();
 const workbench = createWorkbench({
   editor,
+  nodes,
+  onBound(role, element) {
+    if (role === "commands") attachLog(element);
+    else if (role.startsWith("editor-")) editor.bind(role, element);
+  },
   examples: sources.examples,
   compilerUrl: here("./compiler-worker.js"),
   runnerUrl: here("./run-worker.js"),
@@ -20,7 +26,7 @@ const workbench = createWorkbench({
 });
 
 // The Commands panel shows the preview's commands; the shell's own need no trace.
-const surface = createDomSurface(document.getElementById("app"), new Map(), undefined, () => {});
+const surface = createDomSurface(document.getElementById("app"), nodes, undefined, () => {});
 
 const roots = generated.interfaces.filter((item) => !item.handle);
 const providerOf = (item) => (item.identity.trait_path.endsWith("Workbench") ? workbench : surface);

@@ -96,13 +96,13 @@ fn list() -> void $ Ui + Theme:
             "${remaining.get()} left"
         for_each(todos.read(), fn(todo): todo.id, fn(todo): todo_row(todos, todo))
         row(style=Style::empty().gap(8.0)):
-            input(draft, style=Style::empty().grow(1.0).padding_x(8.0).padding_y(4.0).radius(6.0).border(1.0, p.line))
-            on(
-                "enter",
-                fn(title: string):
-                    add(todos, next_id, draft, title)
-                ,
-            )
+            input(draft, style=Style::empty().grow(1.0).padding_x(8.0).padding_y(4.0).radius(6.0).border(1.0, p.line)):
+                on(
+                    "enter",
+                    fn(title: string):
+                        add(todos, next_id, draft, title)
+                    ,
+                )
             button(
                 fn():
                     add(todos, next_id, draft, draft.peek())

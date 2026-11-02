@@ -28,7 +28,7 @@ pub trait Workbench:
     fn example(&mut self, name: string) -> string
     ## Whether to start dark: the visitor's saved choice, else the system's.
     ## Until a choice is saved, the host reports each change of the system's
-    ## as a "theme-change" event, "dark" or "light", on `#shell`.
+    ## as a "theme-change" event, "dark" or "light", on the "shell" node.
     fn prefers_dark(&mut self) -> bool
     ## Saves the visitor's choice and applies it to what hdru does not draw:
     ## the page's own colors and the preview's defaults.
@@ -42,3 +42,8 @@ pub trait Workbench:
     fn stop(&mut self) -> void
     ## Selects `problem`'s place in the editor and scrolls to it.
     fn reveal(&mut self, problem: Problem) -> void
+    ## Tells the host which node plays `role`, once the node exists: "shell",
+    ## "editor-gutter", "editor-back", "editor-input", "preview" or "commands".
+    fn bind(&mut self, role: string, node: usize) -> void
+    ## Indents the editor's selection, or outdents it.
+    fn indent(&mut self, outdent: bool) -> void

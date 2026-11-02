@@ -5,12 +5,15 @@ use std.function.Fn
 use dep.ui.{
     Align,
     Mutate,
+    Owner,
+    NodeId,
     Palette,
     ReadSignal,
     Resource,
     Signal,
     Size,
     Style,
+    Target,
     Theme,
     Track,
     Ui,
@@ -19,6 +22,7 @@ use dep.ui.{
     for_each,
     memo,
     on,
+    on_ready,
     provide_theme,
     resource,
     rgb,
@@ -26,6 +30,7 @@ use dep.ui.{
     show,
     signal,
     style_live,
+    take_keys,
     text,
     view,
 }
@@ -124,6 +129,24 @@ pub fn appended(log: string, more: string) -> string:
         _ := lines.remove_at(0)
     lines.join("\n")
 
+# The keys the editor takes from the browser. After Escape it takes none, so that
+# Tab can leave the editor and the keyboard is never trapped in it.
+fn editor_keys(leaving: bool) -> List[string]:
+    if leaving: [] else: ["Tab", "Shift+Tab"]
+
+## Whether the editor gives its keys back, after `key` from `now`: Escape asks for
+## it, a modifier alone changes nothing, and any other key ends it.
+pub fn leaving_after(key: string, now: bool) -> bool:
+    if key == "Escape":
+        return true
+    if ["Shift", "Control", "Alt", "Meta"].contains(key):
+        return now
+    false
+
+# Binds the block's node to `role`, for the host to find.
+fn bound(bench: *mut dyn Workbench, role: string) -> void $ Owner + Target:
+    on_ready(fn(node: NodeId) -> void $ Mutate: bench.bind(role, node))
+
 fn pressed(on: bool) -> string:
     if on: "true" else: "false"
 
@@ -144,13 +167,13 @@ fn panel_head[F < 'static & Fn() -> string $ Track](title: string, note: F) -> v
 # are as many as its longest report, however long the session.
 fn problem_row(item: ReadSignal[Problem], bench: *mut dyn Workbench) -> void $ Ui:
     view(style=Style::empty().dom_class("problem")):
+        attr("data-severity", fn(): item.get().severity)
+        attr("role", fn(): "button")
+        attr("tabindex", fn(): "0")
+        on("click", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
+        on("enter", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
         text:
             label(item.get())
-    attr("data-severity", fn(): item.get().severity)
-    attr("role", fn(): "button")
-    attr("tabindex", fn(): "0")
-    on("click", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
-    on("enter", fn(payload: string) -> void $ Mutate: bench.reveal(item.peek()))
 
 # What a theme choice writes. Colors that follow it are in `style_live`s, and
 # hover and focus colors are the stylesheet's, which the host keeps in step.
@@ -192,7 +215,15 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
     start := fn() -> void $ Mutate:
         log.set("")
         runs.update(fn(n): n + 1)
+    leaving := signal(false)
     column(style=Style::empty().height(.Pct(100.0))):
+        bound(bench, "shell")
+        dom_on(
+            "theme-change",
+            fn(scheme: string) -> void $ Mutate:
+                apply_theme(dark, palette, scheme == "dark")
+            ,
+        )
         style_live:
             p := theme.get()
             Style::empty().bg(p.background).color(p.on_surface)
@@ -217,14 +248,14 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
                         ,
                         style=Style::empty().dom_class("tab"),
                     ):
+                        attr("aria-pressed", fn(): pressed(current.get() == name))
                         text(fn(): name)
-                    attr("aria-pressed", fn(): pressed(current.get() == name))
             view(style=Style::empty().grow(1.0)):
                 pass
             view(style=Style::empty().dom_class("status")):
+                attr("data-state", fn(): status_state(latest.get()))
                 text:
                     status_text(latest.get())
-            attr("data-state", fn(): status_state(latest.get()))
             button(
                 fn():
                     next := !dark.peek()
@@ -233,14 +264,11 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
                 ,
                 style=Style::empty().dom_class("btn btn-icon theme-toggle"),
             ):
-                pass
-            attr("id", fn(): "theme-toggle")
-            attr("aria-label", fn(): theme_label(dark.get()))
-            attr("title", fn(): theme_label(dark.get()))
+                attr("aria-label", fn(): theme_label(dark.get()))
+                attr("title", fn(): theme_label(dark.get()))
             link(REPOSITORY, style=Style::empty().dom_class("btn btn-icon github-link")):
-                pass
-            attr("aria-label", fn(): "hdru on GitHub")
-            attr("title", fn(): "hdru on GitHub")
+                attr("aria-label", fn(): "hdru on GitHub")
+                attr("title", fn(): "hdru on GitHub")
         row(style=Style::empty().grow(1.0).min_height(.Px(0.0)).dom_class("workspace")):
             column(style=Style::empty().grow(1.0).width(.Pct(50.0)).min_height(.Px(0.0)).dom_class("half half-left")):
                 # The field on top edits; the same text behind it shows the
@@ -249,13 +277,28 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
                     style_live:
                         Style::empty().bg(theme.get().surface)
                     view(style=Style::empty().font_size(13.0).dom_class("editor-gutter")):
+                        bound(bench, "editor-gutter")
                         text:
                             numbers.get()
                     view(style=Style::empty().padding(12.0).font_size(13.0).dom_class("editor-back")):
+                        bound(bench, "editor-back")
                         text:
                             source.get()
-                    attr("id", fn(): "editor-back")
-                    textarea(source, style=Style::empty().padding(12.0).font_size(13.0).dom_class("editor-input"))
+                    textarea(source, style=Style::empty().padding(12.0).font_size(13.0).dom_class("editor-input")):
+                        bound(bench, "editor-input")
+                        take_keys(fn(): editor_keys(leaving.get()))
+                        on(
+                            "key",
+                            fn(key: string) -> void $ Mutate:
+                                # A taken Tab: with the keys given back, the browser has moved the focus.
+                                if !leaving.peek():
+                                    if key == "Tab":
+                                        bench.indent(false)
+                                    else if key == "Shift+Tab":
+                                        bench.indent(true)
+                                leaving.update(fn(now): leaving_after(key, now))
+                            ,
+                        )
                 view(style=Style::empty().dom_class("dock")):
                     panel_head("Problems", fn(): "${problems.get().len()}")
                     view(style=Style::empty().max_height(.Px(160.0)).dom_class("pane")):
@@ -272,15 +315,13 @@ fn shell(bench: *mut dyn Workbench, dark: Signal[bool], palette: Signal[Palette]
                         text:
                             preview_note(ran.get(), latest.get())
                     view(style=Style::empty().dom_class("stage-frame")):
-                        pass
-                    attr("id", fn(): "preview")
+                        bound(bench, "preview")
                 panel_head("Commands", fn(): "what the UI sends its renderer")
                 view(style=Style::empty().grow(1.0).height(.Px(0.0)).dom_class("pane log")):
+                    bound(bench, "commands")
+                    dom_on("preview-log", fn(more: string) -> void $ Mutate: log.update(fn(now): appended(now, more)))
                     text:
                         log.get()
-                # Both act on the view just built.
-                attr("id", fn(): "commands")
-                dom_on("preview-log", fn(more: string) -> void $ Mutate: log.update(fn(now): appended(now, more)))
 
 ## The playground.
 pub fn app() -> void $ Ui + Workbench:
@@ -290,11 +331,3 @@ pub fn app() -> void $ Ui + Workbench:
     palette := signal(palette_of(starts_dark))
     provide_theme(palette):
         shell(bench, dark, palette)
-    # Both act on the shell's root, the column just built.
-    attr("id", fn(): "shell")
-    dom_on(
-        "theme-change",
-        fn(scheme: string) -> void $ Mutate:
-            apply_theme(dark, palette, scheme == "dark")
-        ,
-    )

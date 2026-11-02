@@ -91,7 +91,7 @@ unknown kind renders as `box`.
 | `click` | empty | `click` | Enter or Space on the focus, or a left press |
 | `input` | the field's text | `input` | editing a focused field |
 | `change` | `"true"` / `"false"` | `change` | Space or a press on a checkbox |
-| `key` | the key name, as `KeyboardEvent.key` | `keydown` | any key on the focus but Tab, Shift-Tab and the quit keys |
+| `key` | the key name, as `KeyboardEvent.key`, with `Ctrl+`, `Alt+`, `Meta+`, and `Shift+` before a named key | `keydown`, outside a composition | any key on the focus but Tab, Shift+Tab and the quit keys, unless the node takes them |
 | `enter` | the field's text | `keydown` of Enter | Enter in a focused field |
 
 Events bubble to ancestors' listeners on both renderers. `ui-dom`'s `dom_on` reaches the DOM's own events as
@@ -127,6 +127,10 @@ Edges stay four keys rather than one value: a provider reads each by name, and f
 | `value` | Text | `input.value` | the field's text |
 | `checked` | Flag | `input.checked` | the checkbox's state |
 | `disabled` | Flag | `disabled` | dim, takes no focus |
+| `take_keys` | Text, key names by line | `preventDefault` on those keys | they reach the node's `key` listeners instead of moving the focus, clicking or quitting; never Ctrl-C |
+
+**A key is taken beforehand** because a handler runs after the event has crossed into wasm, too late to stop a default.
+The renderer checks `take_keys` as the key arrives.
 
 **`color` and `font_weight` inherit on both renderers.** `text` takes no style, so its block
 can be trailing; text is styled by its container and depends on this.
@@ -157,11 +161,11 @@ column(style=Style::empty().gap(8.0).padding(12.0).bg(theme.surface)):
   background setter is `bg`.
 - `lower(style)` gives one `SetProp` per set field, and `diff(last, next)` gives changed keys,
   with `Unset` for a key that went to `None`.
-- `style_live:` restyles the enclosing container and emits only changed keys, nothing for an
+- `style_live:` restyles the block's node and emits only changed keys, nothing for an
   equal style. Its first run compares with an empty style, so give a key a static or a live
   value, not both, or `Unset` can remove the static one.
 - `column` and `row` are `view` with `direction` set, always emitted.
-- `ui-dom`'s `DomStyle` adds a `dom_class` chain method to `Style`, and its `attr` / `attr` set attributes.
+- `ui-dom`'s `DomStyle` adds a `dom_class` chain method to `Style`, and its `attr` sets attributes.
   Importing them is what makes a component DOM-only.
 
 ## Theme instead of a cascade
@@ -195,7 +199,9 @@ and `next_event`. Suspending methods may return a value or a Promise, and each m
 
 `ui-dom/providers/dom.mjs` is the react-native-web of this design. In a browser it drives real
 elements under `#app`; anywhere else it keeps an in-memory tree, prints each batch, and answers
-the events in `UI_CLICKS` (`2,2,1` clicks, `4=milk` sends a payload). `cssFor(key, value)` is the key
+the events in `UI_CLICKS` (`2,2,1` clicks, `4=milk` sends a payload). `createDomSurface(root, nodes, log, trace)` lets a page
+own the table of elements by node id, which is how host code given an id by `on_ready` finds its element, and
+choose where the trace of commands goes. `cssFor(key, value)` is the key
 table as a pure function. Unknown kinds and keys are logged once.
 
 `web/` holds the browser pages, and `web/playground/` the playground (`playground.md`). `web/main.js` bundles `../hd-lang/host/web.ts`, the generated
@@ -225,7 +231,8 @@ color stands.
 **Keys.** Tab and Shift-Tab move the focus, Enter and Space click, Space toggles a checkbox, and
 typing, Left, Right, Home, End, Backspace and Delete edit a field. A left press focuses the nearest
 listening node under it and clicks it, and a field only takes the focus. `q` quits except in a field,
-where it is a letter. Ctrl-C always quits.
+where it is a letter. Ctrl-C always quits. A focused node's `take_keys` take any of these but Ctrl-C: such a key goes
+to its `key` listeners instead, with Shift-Tab named `Shift+Tab`.
 
 **A key is read when hd asks for an event, not when it arrives,** so each sees the tree the previous
 key's event left. It cannot append to a value a batch is about to replace, or act on a row a click is

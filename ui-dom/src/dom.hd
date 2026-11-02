@@ -2,7 +2,7 @@
 ## other renderers ignore, so code that reaches past the portable vocabulary
 ## shows it in its imports (`rendering.md`).
 use std.function.{Fn, FnMut}
-use dep.ui.{Mutate, PropValue, Signal, Style, Track, Ui, container, on, prop, text_field}
+use dep.ui.{Decorate, Mutate, Owner, PropValue, Signal, Style, Target, Track, Ui, container, on, prop, text_field}
 
 ## `dom_class`, as a chain method on `ui`'s `Style`.
 pub trait DomStyle:
@@ -13,35 +13,44 @@ impl DomStyle for Style:
     fn dom_class(self, value: string) -> Style:
         self.host_prop("dom:class", .Text(value))
 
-## A DOM attribute of `last_node()` that follows the signals `value` reads: on a
-## container once its block has run, or from inside the block on the child built
-## last.
+## A DOM attribute of the block's node that follows the signals `value` reads.
 ##
 ## ```hd
 ## use dep.ui.{Ui, column, text}
 ## use pkg.attr
 ## fn page() -> void $ Ui:
 ##     column:
+##         attr("id", fn(): "main")
 ##         text(fn(): "hi")
-##         attr("title", fn(): "greeting")
-##     attr("id", fn(): "main")
 ## ```
-pub fn attr[F < 'static & Fn() -> string $ Track](name: string, value: F) -> void $ Ui:
+pub fn attr[F < 'static & Fn() -> string $ Track](name: string, value: F) -> void $ Owner + Target:
     prop("dom:attr:$name", fn() -> PropValue $ Track: .Text(value()))
 
-## Calls `handler` when the DOM event `event` fires on `last_node()`. The
+## Calls `handler` when the DOM event `event` fires on the block's node. The
 ## payload is a `CustomEvent`'s string `detail`, else the target's value.
-pub fn dom_on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Ui:
+pub fn dom_on[F < 'static & FnMut(string) -> void $ Mutate](event: string, mut handler: F) -> void $ Owner + Target:
     on("dom:$event", fn(payload: string) -> void $ Mutate: handler(payload))
 
-## A link to `href`, holding what its block builds. It opens in a new tab, and
-## `last_node()` names it afterwards, so `attr` can label it.
-pub fn link[$R](href: string, style: Style = Style::empty(), children: fn() -> void $ Ui + R) -> void $ Ui + R:
-    container("dom:a", style, children)
-    attr("href", fn(): href)
-    attr("target", fn(): "_blank")
-    attr("rel", fn(): "noopener noreferrer")
+## A link to `href`, holding what its block builds, which opens in a new tab.
+pub fn link[$R](href: string, style: Style = Style::empty(), children: fn() -> void $ Ui + Target + R) -> void $ Ui + R:
+    container(
+        "dom:a",
+        style,
+        fn() -> void $ Ui + Target + R:
+            attr("href", fn(): href)
+            attr("target", fn(): "_blank")
+            attr("rel", fn(): "noopener noreferrer")
+            children()
+        ,
+    )
+
+fn undecorated() -> void $ Decorate:
+    pass
 
 ## A multi-line text field bound to `value`, as `ui`'s `input` is.
-pub fn textarea(value: Signal[string], style: Style = Style::empty()) -> void $ Ui:
-    text_field("dom:textarea", value, style)
+pub fn textarea(
+    value: Signal[string],
+    style: Style = Style::empty(),
+    decorate: fn() -> void $ Decorate = undecorated,
+) -> void $ Ui:
+    text_field("dom:textarea", value, style, decorate)

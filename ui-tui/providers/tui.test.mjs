@@ -761,3 +761,26 @@ test("a press on a button's label reaches the button", async () => {
   const { surface, terminal } = surfaceOf([...rowBox(1), create(2, "button"), append(1, 2), ...labelled(2, "ok"), listen(2, "click", 7)], { rows: 3, cols: 10 });
   assert.deepEqual(await eventsAfter(surface, terminal, "\x1b[<0;2;1M"), [{ handler: 7, payload: "" }]);
 });
+
+test("a node takes keys from the renderer, can give them back, and never Ctrl-C", async () => {
+  const items = [
+    ...column(1),
+    create(2, "input"),
+    append(1, 2),
+    listen(2, "key", 9),
+    set(2, "take_keys", word("Tab\nShift+Tab\nq")),
+    create(3, "button"),
+    append(1, 3),
+    ...labelled(3, "next"),
+    listen(3, "click", 8),
+  ];
+  const { surface, terminal } = surfaceOf(items, { rows: 5, cols: 20 });
+  assert.equal(surface.focused().id, 2);
+  assert.deepEqual(await eventsAfter(surface, terminal, "\t"), [{ handler: 9, payload: "Tab" }]);
+  assert.equal(surface.focused().id, 2, "the focus stayed");
+  assert.deepEqual(await eventsAfter(surface, terminal, "\x1b[Z"), [{ handler: 9, payload: "Shift+Tab" }]);
+  assert.equal(surface.focused().id, 2);
+  surface.apply([set(2, "take_keys", word(""))]);
+  await eventsAfter(surface, terminal, "\t");
+  assert.equal(surface.focused().id, 3, "given back: Tab moves the focus");
+});

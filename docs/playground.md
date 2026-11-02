@@ -20,7 +20,7 @@ Sandboxed iframe                        <--->  Run worker
 | The shell | `playground/src/lib.hd` | the UI, in hdru. DOM-only, so it may import `ui-dom`'s words (`layering.md`) |
 | `Workbench` | `playground/src/workbench.hd`, `providers/workbench.mjs` | what hd cannot do: compile, run, show a place in the editor |
 | The wire format | `playground/providers/compiler.mjs` | how to talk to `hd_web`, for the worker and the build |
-| The editor | `web/playground/editor.mjs` | what an hdru event cannot: colors, and preventing Tab's default |
+| The editor | `web/playground/editor.mjs` | what hdru has no words for: colors, the selection and the undo history |
 | The command log | `web/playground/log.mjs` | colors, and staying at the newest line |
 | The pages | `web/playground/` | the HTML, the stylesheet, the workers and `build.mjs` |
 
@@ -32,6 +32,9 @@ same renderer any page uses. Tapping that stream is the command log.
 and a shared program should not get the page's origin that way. The program's other reach is limited by its wasm grants:
 `Surface`, `Console` and `Clock`.
 
+**The host finds nodes by id, not by a DOM id.** A block calls `on_ready`, passes its `NodeId` to `Workbench.bind` with a
+role, and the host looks it up in the table it gave `createDomSurface`.
+
 **The shell and the program are separate wasm instances,** as `ui` holds one UI per program.
 
 ## The editor
@@ -41,6 +44,8 @@ with hd-lang's `classify` through the CSS Custom Highlight API, so coloring adds
 set colors and decoration, which keeps both layers' glyphs the same width, and problems are wavy underlines on the same
 layer.
 
+- The shell decides what keys do. It takes Tab and Shift+Tab with `take_keys` and calls `Workbench.indent`. After Escape
+  it gives them back, so Tab can leave the editor and the keyboard is never trapped.
 - The compiler's columns count characters, and JavaScript offsets count UTF-16 units. `rangeOf` converts, so an emoji
   earlier in a line does not shift what is underlined.
 - An edit drops the underlines at once, since their places are stale. The problem rows stay until the next report, so

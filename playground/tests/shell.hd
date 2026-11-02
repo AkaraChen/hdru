@@ -1,5 +1,5 @@
 use std.testing.assert_equal
-use dep.ui.{Command, HandlerId, NodeId, PropValue, Resource, UiEvent, dispatch, mount, reset_for_test, take_commands}
+use dep.ui.{Command, HandlerId, NodeId, PropValue, Resource, UiEvent, dispatch, mount, reset_for_test, run_ready, take_commands}
 use pkg.{Problem, Report, Workbench, app, appended, label, line_numbers, preview_note, status_state, status_text}
 
 fn problem(line: i32) -> Problem:
@@ -23,6 +23,8 @@ fn clean() -> Report:
 struct Bench:
     dark: bool
     saved: string
+    bound: List[string]
+    indented: List[bool]
 
 impl Workbench for Bench:
     fn example(&mut self, name: string) -> string:
@@ -45,6 +47,12 @@ impl Workbench for Bench:
 
     fn reveal(&mut self, problem: Problem) -> void:
         pass
+
+    fn bind(&mut self, role: string, node: usize) -> void:
+        self.bound.push(role)
+
+    fn indent(&mut self, outdent: bool) -> void:
+        self.indented.push(outdent)
 
 fn listener(commands: List[Command], name: string) -> HandlerId:
     for command in commands:
@@ -89,7 +97,7 @@ it("the log drops its oldest lines past the limit, at a line"):
 
 it("a system theme change only restyles"):
     reset_for_test()
-    $.with(Workbench=box(Bench { dark: false, saved: "" })):
+    $.with(Workbench=box(Bench { dark: false, saved: "", bound: [], indented: [] })):
         _ := mount(app)
     commands := take_commands()
     dispatch(UiEvent { handler: listener(commands, "dom:theme-change"), payload: "dark" })
@@ -100,31 +108,89 @@ it("a system theme change only restyles"):
             .SetProp(_, _, _) => pass
             _ => panic("not only a restyle")
 
-# The click handler of the node whose id attribute is `id`.
-fn click_of(commands: List[Command], id: string) -> HandlerId:
-    # Node 0 is the root, which never has an id.
+# The handler of `event` on the node whose attribute `name` is first `value`.
+fn handler_of(commands: List[Command], name: string, value: string, event: string) -> HandlerId:
+    # Node 0 is the root, which no attribute is set on.
     let mut found: NodeId = 0
     for command in commands:
         match command:
-            .SetProp(node, key, value) =>
-                if key == "dom:attr:id" && value == PropValue.Text(id):
+            .SetProp(node, key, v) =>
+                if found == 0 && key == "dom:attr:$name" && v == PropValue.Text(value):
                     found = node
             _ => pass
     for command in commands:
         match command:
-            .Listen(node, event, handler) =>
-                if event == "click" && node == found:
+            .Listen(node, e, handler) =>
+                if e == event && node == found:
                     return handler
             _ => pass
-    panic("no click handler on #$id")
+    panic("no $event handler on the node whose $name is $value")
 
-it("the theme button saves the choice and only restyles"):
+# The handler of `event` on the node of `kind`.
+fn handler_on_kind(commands: List[Command], kind: string, event: string) -> HandlerId:
+    let mut found: NodeId = 0
+    for command in commands:
+        match command:
+            .Create(node, k) =>
+                if k == kind:
+                    found = node
+            _ => pass
+    for command in commands:
+        match command:
+            .Listen(node, e, handler) =>
+                if e == event && node == found:
+                    return handler
+            _ => pass
+    panic("no $event handler on a $kind")
+
+it("Tab indents through the host, and Escape gives Tab back to the browser"):
     reset_for_test()
-    bench := box(Bench { dark: false, saved: "" })
+    bench := box(Bench { dark: false, saved: "", bound: [], indented: [] })
     $.with(Workbench=bench):
         _ := mount(app)
     commands := take_commands()
-    dispatch(UiEvent { handler: click_of(commands, "theme-toggle"), payload: "" })
+    assert_equal(has_prop(commands, "take_keys", "Tab\nShift+Tab"), true, reason="the editor takes Tab")
+    key := handler_on_kind(commands, "dom:textarea", "key")
+    press := fn(name: string) -> void: dispatch(UiEvent { handler: key, payload: name })
+    press("Tab")
+    press("Shift+Tab")
+    press("a")
+    assert_equal(bench.indented, [false, true], reason="indent, outdent, and nothing for a letter")
+    _ := take_commands()
+    press("Escape")
+    assert_equal(has_prop(take_commands(), "take_keys", ""), true, reason="the keys are given back")
+    press("Shift")
+    assert_equal(take_commands().is_empty(), true, reason="a modifier alone changes nothing")
+    press("Tab")
+    assert_equal(bench.indented.len(), 2, reason="the browser moved the focus; no indent")
+    assert_equal(has_prop(take_commands(), "take_keys", "Tab\nShift+Tab"), true, reason="taken again")
+
+fn has_prop(commands: List[Command], name: string, value: string) -> bool:
+    for command in commands:
+        match command:
+            .SetProp(_, key, v) =>
+                if key == name && v == PropValue.Text(value):
+                    return true
+            _ => pass
+    false
+
+it("every role is bound once the shell has been applied"):
+    reset_for_test()
+    bench := box(Bench { dark: false, saved: "", bound: [], indented: [] })
+    $.with(Workbench=bench):
+        _ := mount(app)
+    assert_equal(bench.bound.is_empty(), true, reason="not while mounting")
+    run_ready()
+    for role in ["shell", "editor-gutter", "editor-back", "editor-input", "preview", "commands"]:
+        assert_equal(bench.bound.contains(role), true, reason=role)
+
+it("the theme button saves the choice and only restyles"):
+    reset_for_test()
+    bench := box(Bench { dark: false, saved: "", bound: [], indented: [] })
+    $.with(Workbench=bench):
+        _ := mount(app)
+    commands := take_commands()
+    dispatch(UiEvent { handler: handler_of(commands, "aria-label", "Switch to dark theme", "click"), payload: "" })
     assert_equal(bench.saved, "dark", reason="saved")
     changes := take_commands()
     assert_equal(changes.is_empty(), false, reason="something restyled")
@@ -132,5 +198,5 @@ it("the theme button saves the choice and only restyles"):
         match change:
             .SetProp(_, _, _) => pass
             _ => panic("not only a restyle")
-    dispatch(UiEvent { handler: click_of(commands, "theme-toggle"), payload: "" })
+    dispatch(UiEvent { handler: handler_of(commands, "aria-label", "Switch to dark theme", "click"), payload: "" })
     assert_equal(bench.saved, "light", reason="toggled back")

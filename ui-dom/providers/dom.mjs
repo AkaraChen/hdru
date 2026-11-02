@@ -9,15 +9,20 @@
 // This is the DOM's half of rendering.md: the node kinds and the property
 // keys of its tables mapped onto elements and CSS, the way
 // react-native-web maps React Native's View and style. Unknown kinds render
-// as "box", unknown keys are dropped (each logged once), and keys with a
-// "dom:" prefix are this renderer's own: "dom:class" and "dom:attr:NAME".
+// as "box", unknown keys and events are dropped (each logged once), and names with
+// a "dom:" prefix are this renderer's own: the keys "dom:class" and "dom:attr:NAME",
+// the kinds "dom:textarea" and "dom:a", and "dom:EVENT" for the DOM's own events.
+//
+// `take_keys` is applied here, on keydown, because a handler in hd runs too late
+// to prevent a default. Host code that was given a node id (`on_ready`) finds its
+// element in the `nodes` table it passes to `createDomSurface`.
 //
 // Commands arrive as { tag, fields }; an optional field is a value or
 // null; node and handler ids are Numbers; a PropValue is
 // { tag: "Number" | "Text" | "Flag" | "Paint" | "Extent" | "Unset",
 // fields }. `next_event` may return a Promise, which lets the program wait.
 //
-// The factories and `cssFor` are exported for providers/dom.test.mjs.
+// The factories, `cssFor` and `chordOf` are exported for providers/dom.test.mjs.
 
 const px = (n) => `${n}px`;
 
@@ -136,6 +141,31 @@ function payloadOf(target) {
   return "value" in target ? String(target.value) : "";
 }
 
+// A keydown as a key name: `KeyboardEvent.key`, with `Ctrl+`, `Alt+` and `Meta+`
+// before it, and `Shift+` before a named key, whose name does not show the shift.
+export function chordOf(event) {
+  const { key } = event;
+  if (["Control", "Alt", "Meta", "Shift"].includes(key)) return key;
+  let chord = key;
+  if (event.shiftKey && key.length > 1) chord = `Shift+${chord}`;
+  if (event.metaKey) chord = `Meta+${chord}`;
+  if (event.altKey) chord = `Alt+${chord}`;
+  if (event.ctrlKey) chord = `Ctrl+${chord}`;
+  return chord;
+}
+
+// What a node takes from the browser. One listener per element, reading the
+// current set, so `take_keys` can change without adding listeners.
+const taken = new WeakMap();
+function takeKeys(element, names) {
+  if (!taken.has(element)) {
+    element.addEventListener("keydown", (domEvent) => {
+      if (!domEvent.isComposing && taken.get(element).has(chordOf(domEvent))) domEvent.preventDefault();
+    });
+  }
+  taken.set(element, new Set(names === "" ? [] : names.split("\n")));
+}
+
 function warnOnce(seen, what, log) {
   if (seen.has(what)) return;
   seen.add(what);
@@ -176,6 +206,8 @@ export function createDomSurface(root, nodes = new Map(), log = (line) => consol
       element.checked = !unset && f.value;
     } else if (key === "disabled") {
       element.disabled = !unset && f.value;
+    } else if (key === "take_keys") {
+      takeKeys(element, unset ? "" : f.value);
     } else if (key === "dom:class") {
       element.className = unset ? "" : f.value;
     } else if (key.startsWith("dom:attr:")) {
@@ -224,7 +256,9 @@ export function createDomSurface(root, nodes = new Map(), log = (line) => consol
             if (domEvent.key === "Enter") push({ handler, payload: payloadOf(domEvent.target) });
           });
         } else if (f.event === "key") {
-          element.addEventListener("keydown", (domEvent) => push({ handler, payload: domEvent.key }));
+          element.addEventListener("keydown", (domEvent) => {
+            if (!domEvent.isComposing) push({ handler, payload: chordOf(domEvent) });
+          });
         } else if (f.event === "click" || f.event === "input" || f.event === "change") {
           element.addEventListener(f.event, (domEvent) => push({ handler, payload: payloadOf(domEvent.target) }));
         } else if (f.event.startsWith("dom:")) {

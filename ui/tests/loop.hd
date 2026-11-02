@@ -2,6 +2,9 @@ use pkg.{
     Style,
     Command,
     Mutate,
+    NodeId,
+    on_ready,
+    view,
     Recorder,
     Renderer,
     Track,
@@ -98,13 +101,13 @@ it("a loader that suspends lands through the workers of run_on"):
 fn form() -> void $ Ui:
     draft := signal("hello")
     column:
-        input(draft, style=Style::empty().grow(1.0))
-        on(
-            "enter",
-            fn(text: string) -> void $ Mutate:
-                draft.set("")
-            ,
-        )
+        input(draft, style=Style::empty().grow(1.0)):
+            on(
+                "enter",
+                fn(text: string) -> void $ Mutate:
+                    draft.set("")
+                ,
+            )
         text:
             "draft: ${draft.get()}"
         button(fn(): draft.set("")):
@@ -218,3 +221,16 @@ it("more loads than workers all land"):
                     done += 1
             _ => pass
     assert_equal(done, 20, reason="every load landed")
+
+it("the loop runs on_ready after the host has applied that node"):
+    reset_for_test()
+    recorder := scripted([])
+    logged := box([0])
+    $.with(Renderer=recorder):
+        run_on!(
+            fn() -> void $ Ui:
+                view:
+                    on_ready(fn(node: NodeId) -> void $ Mutate: logged[0] = recorder.log.len())
+            ,
+        )
+    assert_equal(logged[0] > 0, true, reason="the mount was applied first")

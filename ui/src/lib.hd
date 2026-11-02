@@ -31,13 +31,13 @@ pub use dep.reactive.{
     use_context,
     use_given,
 }
-pub use pkg.keys.{HandlerId, NodeId, Parent, Scope, Ui}
+pub use pkg.keys.{Decorate, HandlerId, NodeId, Parent, Scope, Target, Ui}
 pub use pkg.protocol.{Color, Command, PropValue, Size, UiEvent, rgb, rgba}
 pub use pkg.style.{Align, Cursor, Direction, Justify, Overflow, Style, diff, lower}
 pub use pkg.theme.{Palette, SignalTheme, Theme, provide_theme}
-pub use pkg.runtime.{dispatch, last_writes, mount, reset_for_test, take_commands}
+pub use pkg.runtime.{dispatch, last_writes, mount, reset_for_test, run_ready, take_commands}
 pub use pkg.renderer.{Recorder, Renderer, run_on, scripted}
 pub use pkg.resource.{Resource, resource, resource_with}
-pub use pkg.builders.{button, column, container, last_node, prop, row, show, style_live, text, view}
+pub use pkg.builders.{button, column, container, on_ready, prop, row, show, style_live, text, view}
 pub use pkg.collections.{for_each}
-pub use pkg.inputs.{checkbox, input, on, text_field}
+pub use pkg.inputs.{checkbox, input, on, take_keys, text_field}

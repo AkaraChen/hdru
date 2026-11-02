@@ -3,7 +3,7 @@
 How the library works and why it is built this way. `rendering.md` covers the
 protocol, the vocabulary and the renderers; `packages.md` covers the workspace.
 Everything here was checked against the `hd-lang` checkout at commit
-`717b76ad8`. Earlier plans and the phase-by-phase record are in git history.
+`9af95bd2f`. Earlier plans and the phase-by-phase record are in git history.
 
 ## What it is
 
@@ -34,7 +34,7 @@ they explain most of what looks odd in the API.
    (`fn.trait.read-only.values`). `memo`, `text`, `show` and `for_each` take
    their callbacks inline; `button` and `effect` use `FnMut` and accept either.
 4. **Row-polymorphic builders thread keys only through synchronous callbacks.**
-   `fn column[$R](children: fn() -> void $ Ui + R) -> void $ Ui + R` passes any
+   `fn column[$R](children: fn() -> void $ Ui + Target + R) -> void $ Ui + R` passes any
    extra key of the caller through nested blocks. A callback the library retains
    and runs later (`text`, `show`'s branch, `for_each`'s render, handlers,
    loaders) runs under `Track + Mutate` or less, cannot carry `R`, and captures
@@ -158,7 +158,7 @@ row fails to infer from the context argument, and `$.with(providers...)` does no
 
 **`Ui` is a row alias: `type Ui = $ Owner + Parent`.** `memo`, `effect` and the
 like need the current owner, a `reactive` concept, and builders need the current
-node, a `ui` one. Containers re-install only `Parent`; `owned` and `root` only
+node, a `ui` one. Containers re-install only `Parent` and `Target`, a key of its own (below); `owned` and `root` only
 `Owner`. An alias is not a key, so the library writes `$.use(Owner).owner()` and
 `$.use(Parent).parent()`.
 
@@ -180,9 +180,10 @@ round of effects.
 
 **Builders return `void`.** A function's final expression must match its result
 type, so if builders returned a `NodeId`, every component ending in `text(...)`
-would be a `type-mismatch`. Instead the runtime records the node of the builder
-that finished last. `last_node()` returns it, and `on`, `prop` and
-`ui-dom`'s `attr` apply to it.
+would be a `type-mismatch`. So what acts on a node goes in that node's block, under the
+`Target` key: `on`, `prop`, `style_live`, `take_keys` and `on_ready` need it, and only a
+builder's block provides it. An earlier `last_node()`, the node built last, could
+silently name the wrong one; a missing `Target` is a compile error instead.
 
 **`text` takes no style.** Its block is usually trailing, and a trailing block must be
 the last parameter. Text is styled by a wrapping `view`, which is why both renderers
@@ -219,7 +220,7 @@ The handler records the payload as what the control shows, then writes the signa
 with `set_if_changed`. An effect sends a `SetProp` only when the signal differs from
 what the control shows. So a keystroke is never echoed back, and a write from
 elsewhere, such as clearing after a submit, reaches the control. `on(event, handler)`
-listens on `last_node()`.
+listens on the block's node.
 
 ## Resources
 

@@ -1,4 +1,13 @@
 use pkg.{
+    Mutate,
+    NodeId,
+    PropValue,
+    input,
+    on,
+    on_ready,
+    prop,
+    run_ready,
+    take_keys,
     view,
     Style,
     Command,
@@ -6,7 +15,6 @@ use pkg.{
     button,
     column,
     dispatch,
-    last_node,
     mount,
     reset_for_test,
     row,
@@ -139,19 +147,85 @@ it("a button shows what it holds, and a click updates only that"):
     dispatch(UiEvent { handler: 1, payload: "" })
     assert_equal(take_commands(), [.SetText(2, "1")], reason="one command, for the text")
 
-it("a button's block can hold anything, and last_node names the button after it"):
+it("a button's block can hold anything, and address the button"):
     reset_for_test()
-    seen := box([0])
     _ := mount:
         open := signal(true)
         button(fn(): open.update(fn(v): !v)):
+            prop("x:label", fn(): PropValue.Text("toggle"))
             view:
                 text(fn(): "icon")
             show(fn(): open.get()):
                 text(fn(): "label")
-        seen[0] = last_node()
     commands := take_commands()
+    assert_equal(commands.contains(.SetProp(1, "x:label", .Text("toggle"))), true, reason="the button, from its block")
     assert_equal(commands.contains(.Append(1, 2)), true, reason="a box in the button")
-    assert_equal(seen[0], 1, reason="the button")
     dispatch(UiEvent { handler: 1, payload: "" })
     assert_equal(take_commands(), [.Clear(4)], reason="show works inside it")
+
+it("a field's block addresses the field"):
+    reset_for_test()
+    draft := signal("")
+    _ := mount:
+        input(draft):
+            on("key", fn(key: string) -> void $ Mutate: draft.set(key))
+            take_keys(fn(): ["Tab", "Shift+Tab"])
+    commands := take_commands()
+    assert_equal(commands.contains(.Listen(1, "key", 2)), true, reason="on")
+    assert_equal(commands.contains(.SetProp(1, "take_keys", .Text("Tab\nShift+Tab"))), true, reason="take_keys")
+
+it("take_keys follows what it reads, so a node can give a key back"):
+    reset_for_test()
+    _ := mount:
+        taking := signal(true)
+        view:
+            take_keys(fn(): keys_when(taking.get()))
+        button(fn(): taking.set(false)):
+            text(fn(): "give back")
+    _ := take_commands()
+    dispatch(UiEvent { handler: 1, payload: "" })
+    assert_equal(take_commands(), [.SetProp(1, "take_keys", .Text(""))], reason="given back")
+
+fn keys_when(taking: bool) -> List[string]:
+    if taking: ["Tab"] else: []
+
+it("on_ready gets the block's node after its commands are applied"):
+    reset_for_test()
+    seen := box([0])
+    _ := mount:
+        view:
+            on_ready(fn(node: NodeId) -> void $ Mutate: seen[0] = node)
+    assert_equal(seen[0], 0, reason="not while mounting")
+    _ := take_commands()
+    run_ready()
+    assert_equal(seen[0], 1, reason="the view")
+    seen[0] = 0
+    run_ready()
+    assert_equal(seen[0], 0, reason="once")
+
+it("on_ready can write signals, and what that emits is sent"):
+    reset_for_test()
+    _ := mount:
+        label := signal("before")
+        view:
+            on_ready(fn(node: NodeId) -> void $ Mutate: label.set("after"))
+            text:
+                label.get()
+    _ := take_commands()
+    run_ready()
+    assert_equal(take_commands(), [.SetText(2, "after")], reason="one text")
+
+it("on_ready does not run for a node already disposed"):
+    reset_for_test()
+    seen := box([0])
+    _ := mount:
+        open := signal(true)
+        button(fn(): open.set(false)):
+            text(fn(): "hide")
+        show(fn(): open.get()):
+            view:
+                on_ready(fn(node: NodeId) -> void $ Mutate: seen[0] = node)
+    _ := take_commands()
+    dispatch(UiEvent { handler: 1, payload: "" })
+    run_ready()
+    assert_equal(seen[0], 0, reason="the branch went first")

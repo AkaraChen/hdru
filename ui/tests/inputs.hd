@@ -25,13 +25,13 @@ fn send(handler: usize, payload: string) -> List[Command]:
 fn form() -> void $ Ui:
     draft := signal("hello")
     column:
-        input(draft, style=Style::empty().grow(1.0))
-        on(
-            "enter",
-            fn(text: string) -> void $ Mutate:
-                draft.set("")
-            ,
-        )
+        input(draft, style=Style::empty().grow(1.0)):
+            on(
+                "enter",
+                fn(text: string) -> void $ Mutate:
+                    draft.set("")
+                ,
+            )
         text:
             "draft: ${draft.get()}"
         button(fn(): draft.set("")):

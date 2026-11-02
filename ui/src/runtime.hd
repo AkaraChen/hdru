@@ -23,8 +23,8 @@ struct Runtime:
     ## Ids registered since the loop last took them.
     unposted: List[usize]
     next_job: usize
-    ## The node of the builder that finished last, for `last_node`.
-    last_node: NodeId
+    ## What runs once the commands queued so far have been applied.
+    ready: List[fn() -> void $ Mutate]
     ## The sources the last dispatched handler wrote.
     last_writes: List[SourceId]
 
@@ -37,7 +37,7 @@ RUNTIME := box(
         jobs: {},
         unposted: [],
         next_job: 1,
-        last_node: 0,
+        ready: [],
         last_writes: [],
     },
 )
@@ -57,13 +57,27 @@ pub fn create_node(kind: string) -> NodeId:
     emit(.Create(node, kind))
     node
 
-## Records `node` as the one the last builder made, for `last_node`.
-pub fn mark_built(node: NodeId) -> void:
-    runtime().last_node = node
+## Queues `callback` to run after the host has applied the commands queued so
+## far (`run_ready`).
+pub fn after_apply[F < 'static & FnMut() -> void $ Mutate](mut callback: F) -> void:
+    erased := fn() -> void $ Mutate: callback()
+    runtime().ready.push(erased)
 
-## The node `mark_built` recorded last.
-pub fn built_last() -> NodeId:
-    runtime().last_node
+## Runs what `after_apply` queued, in order, as one batch, and flushes. The loop
+## calls this after each `apply!`; a test without a loop calls it itself.
+pub fn run_ready() -> void:
+    rt := runtime()
+    queue := rt.ready
+    rt.ready = []
+    log := box(WriteLog { sources: [] })
+    $.with(Mutate=log):
+        batch(
+            fn() -> void $ Mutate:
+                for callback in queue:
+                    callback()
+            ,
+        )
+    flush()
 
 ## Registers a handler and returns its id.
 pub fn register_handler[F < 'static & FnMut(string) -> void $ Mutate](mut handler: F) -> HandlerId:
@@ -173,6 +187,6 @@ pub fn reset_for_test() -> void:
     rt.jobs = {}
     rt.unposted = []
     rt.next_job = 1
-    rt.last_node = 0
+    rt.ready = []
     rt.last_writes = []
     reset_graph_for_test()

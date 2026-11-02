@@ -145,6 +145,8 @@ fn todos() -> void $ Ui:
   change to the list reruns nothing inside it, and reordering emits only the moves it needs.
 - `show` disposes its branch when hidden and rebuilds it in the same place.
 - `input(draft)` binds to a signal, with no `value` and `onChange` to wire up.
+- What acts on a node goes in its block, such as `input(draft): on("enter", submit)`. A call with no such node, or children
+  for a field, does not compile.
 
 ## Async
 
