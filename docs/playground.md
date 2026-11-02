@@ -63,8 +63,10 @@ Registered packages have fixed identities (`hdru:ui-dom`), so their host traits 
 glue file serves every compile. `build.mjs` compiles a sample with the real compiler and runs `host_glue` on it. It
 also compiles every example, so a broken example fails the build.
 
-Measured once under Node on one machine: about 1.3 to 1.5 s for the first build, about 500 ms for a build after an edit,
-and 15 to 20 ms for a check after an edit. The download has not been measured, at 5.7 MB raw and 1.9 MB gzipped.
+Measured once under Node on one machine: about 1.3 to 1.8 s for the first build, about 500 ms for a build after an edit,
+and 15 to 20 ms for a check after an edit. On the live page in Chrome, the first switches of example after loading took
+up to 2.7 s, and later ones under 200 ms. The preview says "Compiling…" meanwhile, so do not read that as a hang. The
+slow first switches are not fully explained. The download has not been measured, at 5.7 MB raw and 1.9 MB gzipped.
 
 ## Build and run
 
