@@ -252,7 +252,8 @@ or answers handler 0. Core tests in `ui` need no host at all: they use `mount`, 
 - **No in-flight cancellation.** As above. Each load would need a task of its own to cancel, and
   there is no way to start one later.
 - **A fixed pool of four,** for the same reason. The number is one constant.
-- **Signals are never freed**, as above.
+- **Signals are never freed**, as above. That includes the signal `for_each` makes for each
+  row, so a list that keeps mounting new keys grows the graph for as long as the program runs.
 - **`hd` runs on Node here.** This build has no wasmtime engine, so nothing has run on
   it, including `reactive` and `ui`, which have no host trait to stop them.
 
@@ -262,8 +263,4 @@ or answers handler 0. Core tests in `ui` need no host at all: they use `mount`, 
 | --- | --- | --- |
 | [hd-lang#1190](https://github.com/HerringtonDarkholme/hd-lang/issues/1190) | open | a test file that imports nothing from a host-mapped package fails, so it imports one name |
 | [hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191) | open | no native renderer (`rendering.md`) |
-
-**`hd fmt` can still produce code the parser rejects.** It breaks a long `if` in a struct
-field across lines and leaves a comma the parser refuses, which `Style.merge` in
-`ui/src/style.hd` hits. Run `hd check` after it. So far the tree has not been reformatted
-to the layout `hd fmt` now prefers.
+| [hd-lang#1193](https://github.com/HerringtonDarkholme/hd-lang/issues/1193) | open | `hd fmt` breaks a long `if` in a struct field into code the parser rejects; `Style.merge` hits it, so the tree is not reformatted and `hd check` follows every `hd fmt` |

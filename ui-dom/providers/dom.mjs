@@ -1,7 +1,7 @@
 // The provider for `ui-dom`'s `surface.Surface`.
 //
 // In a browser it drives the real DOM under the element with id "app".
-// Anywhere else (hd run --engine node) it keeps an in-memory tree, prints
+// Anywhere else (hd run NAME --engine node) it keeps an in-memory tree, prints
 // each command batch, and answers the events listed in UI_CLICKS, then
 // handler 0 to stop. Each item is a handler id, optionally with a payload:
 // "2,2,1" clicks, "4=milk,5" types "milk" into the field of handler 4.

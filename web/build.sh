@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds both examples and bundles the browser pages into web/dist/.
+# Builds the examples and bundles the browser pages into web/dist/.
 # Needs the hd binary on PATH and pnpm (for esbuild).
 set -e
 here="$(cd "$(dirname "$0")" && pwd)"

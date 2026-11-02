@@ -40,7 +40,7 @@ to write one, `Ui` (the row `$ Owner + Parent`) to build. A write inside a memo 
 read inside a component body is a compile error.
 
 Builders take the caller's whole row, so a component that names a context
-key, `$ Ui + Provided[Theme]`, reads it anywhere in its body, and a missing
+key, `$ Ui + Provided[Config]`, reads it anywhere in its body, and a missing
 provider is a compile error. `input` and `checkbox` are bound to signals.
 
 Style is typed and renderer-neutral (`docs/rendering.md`): builders take
@@ -68,10 +68,10 @@ Tests run on the Node engine only; this `hd` build has no wasmtime engine.
 - The `hd` binary built from it: `cargo install --path crates/hd_cli`
   inside `../hd-lang` (lands in `~/.cargo/bin/hd`). The Node engine is the
   default, and the renderers cannot run under wasmtime.
-- Node 20 or newer, and `pnpm` (for `pnpm dlx esbuild`) if you build the
+- Node 24 (`hd-lang` pins 24.19.0), and `pnpm` (for `pnpm dlx esbuild`) if you build the
   browser pages.
 - Do not run `hd fmt` without `hd check` after it: it can still produce code the
-  parser rejects (`docs/design.md`, "Upstream issues").
+  parser rejects ([hd-lang#1193](https://github.com/HerringtonDarkholme/hd-lang/issues/1193)).
 
 ## Commands
 
@@ -87,7 +87,7 @@ Tests run on the Node engine only; this `hd` build has no wasmtime engine.
 | the counter under Node, DOM provider, three scripted clicks | `cd examples/counter && UI_CLICKS=2,2,1 hd run counter --engine node` |
 | the todos demo under Node, DOM provider | `cd examples/todos && UI_CLICKS=1,8=milk,10 hd run todos --engine node` (toggle, type "milk" and press Enter, reverse) |
 | the fetcher demo under Node, DOM provider (a resource with a delayed loader) | `cd examples/fetcher && UI_CLICKS=2,2 hd run fetcher --engine node` |
-| the browser pages | `./web/build.sh`, then serve `web/` (for example `python3 -m http.server -d web 8765`) and open `index.html` or `todos.html` |
+| the browser pages | `./web/build.sh`, then serve `web/` (for example `python3 -m http.server -d web 8765`) and open `index.html`, `todos.html` or `fetcher.html` |
 
 In a terminal: Tab and Shift-Tab move the focus, Enter and Space click, a left
 press focuses and clicks, typing edits a focused field (with Left, Right, Home,
