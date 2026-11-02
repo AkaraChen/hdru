@@ -21,15 +21,10 @@ eager read in a component body is a compile error, not a runtime check.
 Every public signature follows these. They come from probing the compiler, and
 they explain most of what looks odd in the API.
 
-1. **A closure passed to an `Fn` or `FnMut` bound takes the bound's row.**
-   `button(fn(): pass): ...` works (`fn.trait.bound-closure`). A trailing block
-   should too, but does not yet
-   ([hd-lang#1194](https://github.com/HerringtonDarkholme/hd-lang/issues/1194)):
-   an `effect:` that reads only through `untrack`, or a `text:` that reads no
-   signal, fails with `unsatisfied-trait-bound`, so it is written as an explicit
-   closure, `effect(fn(): ...)`. Each bound lists only the row the library
-   re-installs at run time; a callback that needs another key follows "Keys in
-   retained callbacks" below.
+1. **A closure passed to an `Fn` or `FnMut` bound takes the bound's row,** whether it is written
+   as a closure or as a trailing block (`fn.trait.bound-closure`), so `button(fn(): pass): ...` and
+   `text: "hello"` both work. Each bound lists only the row the library re-installs at run time; a
+   callback that needs another key follows "Keys in retained callbacks" below.
 2. **A concrete `fn` parameter cannot be stored.** Storing one is
    `local-reference-escapes`, whatever the caller passed. Every retained callback
    is a bare type parameter bounded by `'static & Fn/FnMut`, which the library
@@ -297,9 +292,9 @@ or answers handler 0, so the loop's tests in `ui` need no host at all. Tests bel
 
 ## Upstream issues
 
-| Issue | State | What it means here |
+| Issue | State at `9af95bd2f` | What it means here |
 | --- | --- | --- |
-| [hd-lang#1190](https://github.com/HerringtonDarkholme/hd-lang/issues/1190) | open | a test file that imports nothing from a host-mapped package fails, so it imports one name |
-| [hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191) | open | no native renderer (`rendering.md`) |
-| [hd-lang#1194](https://github.com/HerringtonDarkholme/hd-lang/issues/1194) | open | a trailing block for an `Fn`-bounded parameter does not take the bound's row (rule 1); `effect` and `sync` stay separate partly for this, and the `memo` doc test in `reactive.hd` names today's error code, which will change to `type-mismatch` |
-| [hd-lang#1193](https://github.com/HerringtonDarkholme/hd-lang/issues/1193) | open | `hd fmt` breaks a long `if` in a struct field into code the parser rejects; `Style.merge` hits it, so the tree is not reformatted and `hd check` follows every `hd fmt` |
+| [hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191) | design accepted, not built | no native renderer (`rendering.md`) |
+| [hd-lang#1190](https://github.com/HerringtonDarkholme/hd-lang/issues/1190) | fixed | a test file may import nothing from a host-mapped package |
+| [hd-lang#1193](https://github.com/HerringtonDarkholme/hd-lang/issues/1193) | fixed | `hd fmt` no longer breaks a long `if` in a struct field. The tree has not been reformatted since |
+| [hd-lang#1194](https://github.com/HerringtonDarkholme/hd-lang/issues/1194) | fixed | a trailing block takes an `Fn` bound's row (rule 1) |

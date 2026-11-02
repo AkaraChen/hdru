@@ -197,7 +197,7 @@ elements under `#app`; anywhere else it keeps an in-memory tree, prints each bat
 the events in `UI_CLICKS` (`2,2,1` clicks, `4=milk` sends a payload). `cssFor(key, value)` is the key
 table as a pure function. Unknown kinds and keys are logged once.
 
-`web/` holds the browser pages. `web/main.js` bundles `../hd-lang/host/web.ts`, the generated
+`web/` holds the browser pages, and `web/playground/` the playground (`playground.md`). `web/main.js` bundles `../hd-lang/host/web.ts`, the generated
 `counter.host.mjs` and the provider with esbuild, and binds them as `host/run.ts` does for Node. One
 glue file serves all three examples, because the trait belongs to `ui-dom`.
 
@@ -287,15 +287,8 @@ link them, but would own the exchange-buffer codec, which exists only as generat
 host trait the app names (the fetcher adds `hd:Clock`), against an ABI that is not stable and a module name that holds a
 directory hash.
 
-**What #1191 should decide:**
-
-1. Binding shape: a generated Rust trait plus codec, passed to an engine API at instantiation, as the analogue of
-   `NAME.host.mjs`. A GPUI app is a Rust binary that owns `main` and embeds hd, so a dylib adds problems it does not need.
-2. Consent stays as it is: `[capabilities]` in the app's manifest, checked by the embedder as the invoker.
-3. Value conversion mirrors `module.host.package.js-values`: enums with named payload fields become Rust enums with the
-   same names.
-4. How a native provider's completions reach the guest. `completed()` returns the engine's own reactor batch, and on a
-   first look there is no way to add to it from outside. A pending `next_event.start` needs one. Not checked by a run.
+**What is decided.** [hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191) closed with an accepted design, not an
+implementation: `docs/future-work/NATIVE_PACKAGE_HOST_BINDINGS.md` in hd-lang. Until it is built, everything above holds.
 
 The terminal provider shows what such a renderer would keep: the protocol needed no change, and the split into retained
 tree, pure layout and paint carries over, with taffy in place of `place` and GPUI's own focus.

@@ -140,8 +140,7 @@ fn titled() -> void $ Ui + Provided[Theme]:
         text(fn(): theme.name)
         # A retained callback runs later under `Track + Mutate` only, so it
         # captures the value lexically instead of naming the key.
-        # It reads no signal, so its row is written out (design.md, rule 1).
-        text(fn() -> string $ Track: "live ${theme.name}")
+        text(fn(): "live ${theme.name}")
 
 it("given supplies a value through the generic Provided key"):
     reset_for_test()

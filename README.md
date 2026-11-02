@@ -242,16 +242,19 @@ or Ctrl-C quits.
 - **Not included:** routing, virtualized lists, animation, accessibility beyond the DOM's own, and more than one
   UI in a program.
 - **A native renderer is blocked.** Host providers run only on JavaScript for now
-  ([hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191)), so the terminal renderer runs on Node.
-- **A compiler bug rejects some valid blocks.** A `text:` that reads no signal fails until
-  [hd-lang#1194](https://github.com/HerringtonDarkholme/hd-lang/issues/1194) is fixed. Write `text(fn(): "x")`.
+  ([hd-lang#1191](https://github.com/HerringtonDarkholme/hd-lang/issues/1191) has an accepted design, not built yet), so
+  the terminal renderer runs on Node.
 
 ## Try it
 
-You need:
+**In a browser, with nothing to install:** <https://hdru-playground.pages.dev/>. It is an hdru program itself
+([`docs/playground.md`](docs/playground.md)).
 
-- The `hd-lang` checkout beside this repo at `../hd-lang`, last checked at commit `717b76ad8`. The browser build
-  imports its `host/*.ts` directly.
+**Locally,** you need:
+
+- The `hd-lang` checkout beside this repo at `../hd-lang`, last checked at commit `9af95bd2f`. The browser build
+  imports its `host/*.ts` directly. The playground also needs the `hd-web-packages` branch of
+  [Eric-Song-Nop/hd-lang](https://github.com/Eric-Song-Nop/hd-lang/tree/hd-web-packages), which is that commit plus one.
 - The `hd` binary built from it: `cargo install --path crates/hd_cli` inside `../hd-lang`. The Node engine is the
   default, and the renderers cannot run under wasmtime.
 - Node 24 (`hd-lang` pins 24.19.0), and `pnpm` (for `pnpm dlx esbuild`) if you build the browser pages.
@@ -269,11 +272,8 @@ cd examples/todos && hd run todos-tui
 | a terminal app driven by keys, printing plain frames | `cd examples/counter && printf '\t\rq' \| hd run counter-tui` |
 | an example under Node, DOM provider, scripted clicks | `cd examples/counter && UI_CLICKS=2,2,1 hd run counter --engine node` |
 | the todos example, typing "milk" and pressing Enter | `cd examples/todos && UI_CLICKS=1,8=milk,10 hd run todos --engine node` |
-| the playground | `node web/playground/build.mjs`, then serve `web/playground/dist/`; needs the `hd_web` package goal in `../hd-lang` |
+| the playground | `node web/playground/build.mjs`, then serve `web/playground/dist/` (`docs/playground.md`) |
 | the browser pages | `./web/build.sh`, then serve `web/` (for example `python3 -m http.server -d web 8765`) and open `index.html`, `todos.html` or `fetcher.html` |
-
-Run `hd check` after `hd fmt`, which can still produce code the parser rejects
-([hd-lang#1193](https://github.com/HerringtonDarkholme/hd-lang/issues/1193)).
 
 ## Where things are
 
@@ -294,5 +294,6 @@ Read next:
 
 - [`docs/design.md`](docs/design.md): how it works and why
 - [`docs/layering.md`](docs/layering.md): what belongs in which package, and how to add a component
+- [`docs/playground.md`](docs/playground.md): how the playground works, and building and deploying it
 - [`docs/rendering.md`](docs/rendering.md): the protocol, the vocabulary, and writing a renderer
 - [`docs/packages.md`](docs/packages.md): the workspace and manifests

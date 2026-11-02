@@ -87,8 +87,8 @@ If a renderer cannot follow a key exactly, say how it approximates it in the tab
 
 These keep one way to write each thing, so that a new component adds no new concept.
 
-**Content is a closure.** `text(fn(): "hello")` and `text(fn(): "${count.get()}")` are the same function, so static
-content can become live without changing the call. Do not add a `_live` variant of anything. A closure that reads no
+**Content is a closure,** as an argument or a trailing block. `text(fn(): "hello")` and `text(fn(): "${count.get()}")`
+are the same function, so static content can become live without changing the call. Do not add a `_live` variant of anything. A closure that reads no
 signal leaves no computation behind (`run_effect`), so static content costs no more than a string.
 
 **A container takes a block.** If a word can hold other nodes, its last parameter is

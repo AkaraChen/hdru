@@ -107,7 +107,7 @@ impl[T < 'static] ReadSignal[T]:
 ## _ := root:
 ##     count := signal(+1)
 ##     doubled := memo:
-##         count.set(+0)  # error: unsatisfied-trait-bound
+##         count.set(+0)  # error: type-mismatch
 ##         count.get() * 2
 ## ```
 pub fn memo[T < 'static & Eq, F < 'static & Fn() -> T $ Track](compute: F) -> ReadSignal[T] $ Owner:

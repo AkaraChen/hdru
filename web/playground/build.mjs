@@ -1,5 +1,5 @@
-// Builds the playground into web/playground/dist/. Needs the hd binary, cargo,
-// pnpm and the patched hd-lang checkout beside this repository.
+// Builds the playground into web/playground/dist/ (docs/playground.md). Needs the
+// hd binary, cargo, pnpm and the patched hd-lang checkout beside this repository.
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

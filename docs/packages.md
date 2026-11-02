@@ -124,7 +124,6 @@ module = "tui"
 - **A key with `-` is spelled with `_`** in source and in capability paths: `ui-tui` is `dep.ui_tui`.
 - **`[dev-capabilities]`** gives tests a real `Clock`: `ui` for `tests/policy.hd`, whose timeout must really wait, and
   each renderer for its loop tests.
-- **A test file that imports nothing from a host-mapped package fails** (hd-lang#1190), so it imports one name.
 - The examples are workspace members, so `hd test` at the root runs everything.
 
 ## Commands
