@@ -54,11 +54,11 @@ it("run_on drives the counter through a scripted renderer and stops on handler 0
         run_on!(counter)
     log := recorder.log
     assert_equal(log.len(), 24, reason="21 mount commands and 3 updates")
-    assert_equal(log.get(0).copied(), .Some(Command.Create(1, "box")), reason="mount first")
-    assert_equal(log.get(21).copied(), .Some(Command.SetText(2, "Count: 1")), reason="first plus")
-    assert_equal(log.get(22).copied(), .Some(Command.SetText(2, "Count: 2")), reason="second plus")
+    assert_equal(log.get(0), .Some(Command.Create(1, "box")), reason="mount first")
+    assert_equal(log.get(21), .Some(Command.SetText(2, "Count: 1")), reason="first plus")
+    assert_equal(log.get(22), .Some(Command.SetText(2, "Count: 2")), reason="second plus")
     assert_equal(
-        log.get(23).copied(),
+        log.get(23),
         .Some(Command.SetText(2, "Count: 1")),
         reason="minus; the unknown handler 7 emitted nothing",
     )
@@ -90,9 +90,9 @@ it("a loader that suspends lands through the workers of run_on"):
     $.with(Clock=clock, Renderer=recorder):
         run_on!(slow_profile)
     log := recorder.log
-    assert_equal(log.get(2).copied(), .Some(Command.SetText(1, "loading")), reason="mount")
+    assert_equal(log.get(2), .Some(Command.SetText(1, "loading")), reason="mount")
     assert_equal(
-        log.get(3).copied(),
+        log.get(3),
         .Some(Command.SetText(1, "ready: slow user 7")),
         reason="a worker drove the sleeping loader and sent its landing",
     )
@@ -131,9 +131,9 @@ it("run_on carries payloads from the renderer to the handler"):
         run_on!(form)
     log := recorder.log
     assert_equal(log.len(), 28, reason="24 mount commands, then 1, 1 and 2")
-    assert_equal(log.get(24).copied(), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
-    assert_equal(log.get(25).copied(), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
-    assert_equal(log.get(26).copied(), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
+    assert_equal(log.get(24), .Some(Command.SetText(3, "draft: h")), reason="first keystroke")
+    assert_equal(log.get(25), .Some(Command.SetText(3, "draft: hi")), reason="second keystroke")
+    assert_equal(log.get(26), .Some(Command.SetProp(2, "value", .Text(""))), reason="enter clears the field")
 
 fn agree() -> void $ Ui:
     accepted := signal(false)
@@ -157,8 +157,8 @@ it("run_on carries a checkbox's change payload, as the provider sends it"):
         run_on!(agree)
     log := recorder.log
     assert_equal(log.len(), 12, reason="10 mount commands and one text per change")
-    assert_equal(log.get(10).copied(), .Some(Command.SetText(3, "accepted")), reason="space ticks it")
-    assert_equal(log.get(11).copied(), .Some(Command.SetText(3, "not yet")), reason="space unticks it")
+    assert_equal(log.get(10), .Some(Command.SetText(3, "accepted")), reason="space ticks it")
+    assert_equal(log.get(11), .Some(Command.SetText(3, "not yet")), reason="space unticks it")
 
 fn chain() -> void $ Ui + Clock:
     let clock: *mut dyn Clock = $.use(Clock)
@@ -189,7 +189,7 @@ it("loads that lead to loads all land, after the loop has stopped, with no deadl
     recorder := scripted([])
     $.with(Clock=clock, Renderer=recorder):
         run_on!(chain)
-    assert_equal(recorder.log.last().copied(), .Some(Command.SetText(1, "at 40")), reason="the chain ran to its end")
+    assert_equal(recorder.log.last(), .Some(Command.SetText(1, "at 40")), reason="the chain ran to its end")
 
 fn crowd() -> void $ Ui + Clock:
     let clock: *mut dyn Clock = $.use(Clock)

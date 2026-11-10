@@ -28,5 +28,5 @@ it("run_app carries commands and events across the host trait, and stops on hand
     host := box(Host { log: [], events: [UiEvent { handler: 1, payload: "" }] })
     $.with(Surface=host):
         run_app!(app)
-    assert_equal(host.log.get(0).copied(), .Some(Command.Create(1, "button")), reason="mount reached the host")
+    assert_equal(host.log.get(0), .Some(Command.Create(1, "button")), reason="mount reached the host")
     assert_equal(host.events.is_empty(), true, reason="the event was taken")

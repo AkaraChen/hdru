@@ -31,7 +31,7 @@ it("textarea is a field of the dom:textarea kind, bound as input is"):
     draft := signal("a")
     _ := mount(fn() -> void $ Ui: textarea(draft))
     commands := take_commands()
-    assert_equal(commands.get(0).copied(), .Some(Command.Create(1, "dom:textarea")), reason="its kind")
+    assert_equal(commands.get(0), .Some(Command.Create(1, "dom:textarea")), reason="its kind")
     assert_equal(commands.contains(.SetProp(1, "value", .Text("a"))), true, reason="its value")
     dispatch(UiEvent { handler: 1, payload: "ab" })
     assert_equal(draft.peek(), "ab", reason="typing writes the signal")
@@ -63,7 +63,7 @@ it("link is a container of the dom:a kind, and its block can label it"):
         ,
     )
     commands := take_commands()
-    assert_equal(commands.get(0).copied(), .Some(Command.Create(1, "dom:a")), reason="its kind")
+    assert_equal(commands.get(0), .Some(Command.Create(1, "dom:a")), reason="its kind")
     assert_equal(commands.contains(.Append(1, 2)), true, reason="it holds its block")
     assert_equal(commands.contains(.SetProp(1, "dom:attr:href", .Text("https://example.com"))), true, reason="the target")
     assert_equal(commands.contains(.SetProp(1, "dom:attr:rel", .Text("noopener noreferrer"))), true, reason="no opener")

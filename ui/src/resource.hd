@@ -23,7 +23,7 @@ struct Generation:
 fn land![T < 'static, E < 'static](
     mine: usize,
     generation: *mut Generation,
-    pending: mut Suspend[Result[T, E]],
+    pending: Suspend[Result[T, E]],
     state: Signal[Resource[T, E]],
 ) -> void $ Mutate:
     settle(mine, generation, pending!(), state)
@@ -51,7 +51,7 @@ fn follow_key[
     T < 'static,
     E < 'static,
     KF < 'static & Fn() -> K $ Track,
-    J < 'static & Fn(K, usize) -> mut Suspend[void] $ Mutate,
+    J < 'static & Fn(K, usize) -> Suspend[void] $ Mutate,
 ](
     owner: OwnerId,
     generation: *mut Generation,
@@ -94,7 +94,7 @@ pub fn resource[
     T < 'static,
     E < 'static,
     KF < 'static & Fn() -> K $ Track,
-    L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
+    L < 'static & Fn(K) -> Suspend[Result[T, E]],
 ](key: KF, load: L) -> ReadSignal[Resource[T, E]] $ Ui:
     owner := $.use(Owner).owner()
     state := signal::[Resource[T, E]](.Loading)
@@ -104,7 +104,7 @@ pub fn resource[
         generation,
         state,
         key,
-        fn(k: K, mine: usize) -> mut Suspend[void] $ Mutate: land(mine, generation, load(k), state),
+        fn(k: K, mine: usize) -> Suspend[void] $ Mutate: land(mine, generation, load(k), state),
     )
     state.read()
 
@@ -134,7 +134,7 @@ pub fn resource_with[
     T < 'static,
     E < 'static,
     KF < 'static & Fn() -> K $ Track,
-    L < 'static & Fn(K) -> mut Suspend[Result[T, E]],
+    L < 'static & Fn(K) -> Suspend[Result[T, E]],
     P < 'static & Layer[fn!() -> Result[T, E], Wrapped = fn!() -> Result[T, E] $ Clock],
 ](key: KF, load: L, policy: P) -> ReadSignal[Resource[T, E]] $ Ui + Clock:
     owner := $.use(Owner).owner()
@@ -146,7 +146,7 @@ pub fn resource_with[
         generation,
         state,
         key,
-        fn(k: K, mine: usize) -> mut Suspend[void] $ Mutate:
+        fn(k: K, mine: usize) -> Suspend[void] $ Mutate:
             work := fn!() -> Result[T, E]:
                 let mut pending = load(k)
                 pending!()

@@ -11,7 +11,7 @@ use pkg.protocol.{Command, UiEvent}
 ## A resource load waiting for a worker: a cold suspension that drives
 ## the loader and lands its result.
 pub struct Job:
-    pub task: mut Suspend[void]
+    pub task: Suspend[void]
 
 struct Runtime:
     out: List[Command]
@@ -93,7 +93,7 @@ pub fn drop_handler(id: HandlerId) -> void:
 
 ## Registers a job and returns its id. The loop takes it with
 ## `take_new_jobs` and hands it to a worker.
-pub fn register_job(task: mut Suspend[void]) -> usize:
+pub fn register_job(task: Suspend[void]) -> usize:
     rt := runtime()
     id := rt.next_job
     rt.next_job += 1
